@@ -42,33 +42,39 @@ export default function LyricVideoPlayer({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [allImages, setAllImages] = useState<string[]>([]);
 
-  // 初始化圖片：先用第一張，然後背景加載更多
+  // 初始化圖片：先用第一張，然後透過 API 背景加載更多（避免 Safari CORS 問題）
   useEffect(() => {
     const initial = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
     setAllImages(initial);
+    setCurrentImageIndex(0);
 
-    // 背景加載額外 2 張圖片
-    if (initial.length <= 1) {
-      const styles = [
-        "abstract watercolor painting, soft gradients, ethereal mood",
-        "digital fantasy landscape, epic scenery, magical lighting",
-        "neon cyberpunk cityscape, glowing lights, futuristic",
-        "impressionist oil painting, warm tones, romantic mood",
-      ];
-      const shuffled = styles.sort(() => Math.random() - 0.5).slice(0, 2);
+    if (initial.length <= 1 && title) {
+      let cancelled = false;
 
-      shuffled.forEach((style, i) => {
-        const seed = Math.floor(Math.random() * 999999);
-        const prompt = encodeURIComponent(`${style}, ${title}, no text, no words, 4k`);
-        const url = `https://image.pollinations.ai/prompt/${prompt}?width=1280&height=720&nologo=true&seed=${seed}`;
+      const loadExtra = async () => {
+        for (let i = 0; i < 2; i++) {
+          if (cancelled) break;
+          try {
+            const res = await fetch("/api/generate-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ theme: title }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (res.ok && !cancelled) {
+              const data = await res.json();
+              if (data.imageUrl) {
+                setAllImages((prev) => [...prev, data.imageUrl]);
+              }
+            }
+          } catch {
+            // 靜默失敗，不影響播放
+          }
+        }
+      };
 
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          setAllImages((prev) => [...prev, url]);
-        };
-        img.src = url;
-      });
+      loadExtra();
+      return () => { cancelled = true; };
     }
   }, [imageUrl, imageUrls, title]);
 

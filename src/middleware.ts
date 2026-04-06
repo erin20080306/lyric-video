@@ -3,16 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 不攔截的路徑
-  if (
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
-    pathname === "/manifest.json"
-  ) {
-    return NextResponse.next();
-  }
-
   const authToken = request.cookies.get("auth_token")?.value;
   const isLoggedIn = authToken === "authenticated";
 
@@ -30,5 +20,13 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    /*
+     * 只攔截頁面路由，排除：
+     * - api (API routes)
+     * - _next (Next.js 內部)
+     * - favicon, manifest 等靜態檔案
+     */
+    "/((?!api|_next|favicon|manifest|.*\\.).*)",
+  ],
 };
