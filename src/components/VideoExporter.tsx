@@ -339,7 +339,7 @@ export default function VideoExporter({
 
           // WebM → MP4 轉檔（iPhone/LINE/FB 都支援 MP4）
           if (mimeType.includes("webm")) {
-            setTimeInfo("轉檔為 MP4 中...");
+            setTimeInfo("轉檔為 MP4 中（約 10-30 秒）...");
             try {
               const form = new FormData();
               form.append("video", blob, "video.webm");
@@ -348,10 +348,14 @@ export default function VideoExporter({
                 const mp4Blob = await res.blob();
                 await downloadOrShare(mp4Blob, `${title}.mp4`);
               } else {
-                // 轉檔失敗，直接下載 WebM
+                const errData = await res.json().catch(() => ({ error: "未知錯誤" }));
+                console.error("[轉檔失敗]", errData);
+                alert(`MP4 轉檔失敗：${errData.error}\n先下載 WebM 格式`);
                 await downloadOrShare(blob, `${title}.webm`);
               }
-            } catch {
+            } catch (e) {
+              console.error("[轉檔請求失敗]", e);
+              alert("MP4 轉檔請求失敗，先下載 WebM 格式");
               await downloadOrShare(blob, `${title}.webm`);
             }
           } else {
@@ -369,15 +373,25 @@ export default function VideoExporter({
         audio.currentTime = 0;
         audio.play();
 
+        let animStopped = false;
+        const stopRecording = () => {
+          if (animStopped) return;
+          animStopped = true;
+          audio.pause();
+          drawFrame(audio.currentTime);
+          try { recorder.requestData(); } catch {}
+          // 立即停止
+          try {
+            if (recorder.state === "recording") recorder.stop();
+          } catch {
+            finish();
+          }
+        };
+
         const animate = () => {
+          if (animStopped) return;
           if (stopRef.current) {
-            audio.pause();
-            drawFrame(audio.currentTime);
-            try { recorder.requestData(); } catch {}
-            setTimeout(() => {
-              if (recorder.state === "recording") recorder.stop();
-              else finish();
-            }, 500);
+            stopRecording();
             return;
           }
           const t = audio.currentTime;
@@ -388,15 +402,13 @@ export default function VideoExporter({
           if (t < duration && !audio.ended) {
             requestAnimationFrame(animate);
           } else {
-            audio.pause();
-            drawFrame(duration);
-            setTimeout(() => {
-              if (recorder.state === "recording") recorder.stop();
-              else finish();
-            }, 300);
+            stopRecording();
           }
         };
         animate();
+
+        // 備用：監聽音訊結束事件
+        audio.onended = () => stopRecording();
       });
     } catch (err) {
       console.error("[VideoExporter]", err);

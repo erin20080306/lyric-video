@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
-import { writeFile, readFile, unlink, mkdir } from "fs/promises";
+import { writeFile, readFile, unlink, mkdir, access, chmod } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
+import { constants } from "fs";
 
 // Vercel serverless timeout
 export const maxDuration = 60;
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "缺少圖片或音訊資料" }, { status: 400 });
     }
 
+    console.log("[export-video] 開始合成...");
     await mkdir(tmp, { recursive: true });
 
     // 1. 寫入圖片
@@ -46,8 +48,17 @@ export async function POST(request: NextRequest) {
     let ffmpegPath: string;
     try {
       ffmpegPath = require("ffmpeg-static");
+      console.log("[export-video] ffmpeg path:", ffmpegPath);
+    } catch (e) {
+      console.error("[export-video] require ffmpeg-static failed:", e);
+      return NextResponse.json({ error: "FFmpeg 未安裝: " + String(e) }, { status: 500 });
+    }
+
+    // 確保有執行權限
+    try {
+      await access(ffmpegPath, constants.X_OK);
     } catch {
-      return NextResponse.json({ error: "FFmpeg 未安裝" }, { status: 500 });
+      await chmod(ffmpegPath, 0o755);
     }
 
     // 5. 執行 FFmpeg：靜態圖片 + 音訊 → MP4

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execFile } from "child_process";
-import { writeFile, readFile, unlink, mkdir } from "fs/promises";
+import { execFile, exec } from "child_process";
+import { writeFile, readFile, unlink, mkdir, access, chmod } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
+import { constants } from "fs";
 
 export const maxDuration = 60;
 
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "缺少影片檔案" }, { status: 400 });
     }
 
+    console.log(`[convert-video] 收到 ${(file.size / 1024 / 1024).toFixed(2)}MB WebM`);
     await mkdir(tmp, { recursive: true });
 
     // 1. 寫入 WebM
@@ -33,15 +35,25 @@ export async function POST(request: NextRequest) {
     // 2. 輸出路徑
     const outputPath = join(tmp, "output.mp4");
 
-    // 3. FFmpeg 路徑
+    // 3. FFmpeg 路徑（多種方式取得）
     let ffmpegPath: string;
     try {
       ffmpegPath = require("ffmpeg-static");
-    } catch {
-      return NextResponse.json({ error: "FFmpeg 未安裝" }, { status: 500 });
+      console.log("[convert-video] ffmpeg-static path:", ffmpegPath);
+    } catch (e) {
+      console.error("[convert-video] require ffmpeg-static failed:", e);
+      return NextResponse.json({ error: "FFmpeg 未安裝: " + String(e) }, { status: 500 });
     }
 
-    // 4. WebM → MP4 (保持原畫質，只轉容器格式)
+    // 確保有執行權限
+    try {
+      await access(ffmpegPath, constants.X_OK);
+    } catch {
+      console.log("[convert-video] 設定 FFmpeg 執行權限...");
+      await chmod(ffmpegPath, 0o755);
+    }
+
+    // 4. WebM → MP4
     await new Promise<void>((resolve, reject) => {
       execFile(
         ffmpegPath,
@@ -60,9 +72,10 @@ export async function POST(request: NextRequest) {
         { timeout: 55000 },
         (error, _stdout, stderr) => {
           if (error) {
-            console.error("[FFmpeg convert error]", stderr);
-            reject(new Error(`轉檔失敗: ${error.message}`));
+            console.error("[FFmpeg convert error]", error.message, stderr);
+            reject(new Error(`FFmpeg 執行失敗: ${error.message}`));
           } else {
+            console.log("[convert-video] FFmpeg 轉檔完成");
             resolve();
           }
         }
