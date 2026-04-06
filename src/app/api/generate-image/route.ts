@@ -17,9 +17,10 @@ export async function POST(request: NextRequest) {
 
     // 嘗試用 Pollinations.ai 生成 AI 圖片
     try {
+      const seed = Math.floor(Math.random() * 999999);
       const aiPrompt = `beautiful cinematic music album cover art, ${theme}, dreamy atmosphere, vibrant colors, aesthetic, no text, no words, no letters, 4k`;
       const encoded = encodeURIComponent(aiPrompt);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true`;
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&seed=${seed}`;
 
       console.log("[Image] 使用 Pollinations.ai 生成圖片...");
 
