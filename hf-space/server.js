@@ -21,6 +21,73 @@ app.get("/", (_req, res) => {
   res.json({ status: "ok", service: "lyric-video-server" });
 });
 
+// ===== ffprobe 偵測音訊長度 =====
+function getAudioDuration(filePath) {
+  return new Promise((resolve) => {
+    execFile("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      filePath,
+    ], { timeout: 10000 }, (error, stdout) => {
+      if (error) {
+        console.error("[ffprobe] error:", error.message);
+        resolve(0);
+      } else {
+        resolve(parseFloat(stdout.trim()) || 0);
+      }
+    });
+  });
+}
+
+// ===== 歌詞解析（與前端 parseLyrics 相同邏輯）=====
+function parseLyrics(lyricsText, totalDuration) {
+  const rawLines = lyricsText.split("\n");
+  const parsed = [];
+
+  for (const raw of rawLines) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      parsed.push({ text: "", type: "empty" });
+    } else if (trimmed.startsWith("【") || trimmed.startsWith("作詞") || trimmed.startsWith("作曲")) {
+      parsed.push({ text: trimmed, type: "title" });
+    } else if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      parsed.push({ text: trimmed, type: "section" });
+    } else {
+      parsed.push({ text: trimmed, type: "lyric" });
+    }
+  }
+
+  const getWeight = (type) => {
+    switch (type) {
+      case "title": return 1.5;
+      case "section": return 1.2;
+      case "lyric": return 1.0;
+      case "empty": return 0.3;
+      default: return 1.0;
+    }
+  };
+
+  const totalWeight = parsed.reduce((sum, l) => sum + getWeight(l.type), 0);
+  if (totalWeight === 0) return [];
+  const timePerWeight = totalDuration / totalWeight;
+
+  const lines = [];
+  let currentTime = 0;
+  for (const item of parsed) {
+    const weight = getWeight(item.type);
+    const dur = timePerWeight * weight;
+    lines.push({
+      text: item.text,
+      startTime: currentTime,
+      endTime: currentTime + dur,
+      type: item.type,
+    });
+    currentTime += dur;
+  }
+  return lines;
+}
+
 // ===== ASS 字幕生成 =====
 function formatASSTime(seconds) {
   const h = Math.floor(seconds / 3600);
@@ -91,7 +158,7 @@ app.post(
     try {
       fs.mkdirSync(tmp, { recursive: true });
 
-      const { title = "歌曲", lyrics: lyricsJson, duration: durationStr } = req.body;
+      const { title = "歌曲", lyrics: lyricsRaw = "", duration: durationStr } = req.body;
       const imageFile = req.files?.image?.[0];
       const audioFile = req.files?.audio?.[0];
 
@@ -109,13 +176,31 @@ app.post(
       fs.renameSync(imageFile.path, imgPath);
       fs.renameSync(audioFile.path, audioPath);
 
-      // 解析歌詞
-      let lyrics = [];
-      try {
-        lyrics = JSON.parse(lyricsJson || "[]");
-      } catch {}
+      // 用 ffprobe 偵測真正的音訊長度
+      const probeDuration = await getAudioDuration(audioPath);
+      const fallbackDuration = parseFloat(durationStr) || 60;
+      const duration = probeDuration > 0 ? probeDuration : fallbackDuration;
+      console.log(`[${id}] 音訊長度: ${duration.toFixed(1)}s (probe=${probeDuration.toFixed(1)}, fallback=${fallbackDuration})`);
 
-      const duration = parseFloat(durationStr) || 60;
+      // 後端解析歌詞時間軸（用真正的音訊長度）
+      let lyrics = [];
+      if (lyricsRaw) {
+        // 嘗試解析 JSON（舊格式）或純文字（新格式）
+        try {
+          const parsed = JSON.parse(lyricsRaw);
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].text) {
+            // 舊格式：已解析的 JSON，但重新用正確 duration 計算時間
+            const rawText = parsed.map(l => l.text).join("\n");
+            lyrics = parseLyrics(rawText, duration);
+          } else {
+            lyrics = parseLyrics(lyricsRaw, duration);
+          }
+        } catch {
+          // 純文字歌詞
+          lyrics = parseLyrics(lyricsRaw, duration);
+        }
+      }
+      console.log(`[${id}] 歌詞: ${lyrics.filter(l => l.type === "lyric").length} 行`);
 
       // 生成 ASS 字幕
       let vfFilter = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2";

@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Loader2, Music, ImageIcon, Film } from "lucide-react";
-import { parseLyrics } from "@/lib/lyrics-parser";
 
 // ===== 後端 FFmpeg 伺服器 URL =====
 const VIDEO_SERVER =
@@ -95,7 +94,6 @@ export default function VideoExporter({
   const [statusText, setStatusText] = useState("");
   const [downloadingMp3, setDownloadingMp3] = useState(false);
   const [materialsReady, setMaterialsReady] = useState(false);
-  const [audioDuration, setAudioDuration] = useState(0);
   const imageBlobRef = useRef<Blob | null>(null);
   const audioBlobRef = useRef<Blob | null>(null);
 
@@ -131,16 +129,6 @@ export default function VideoExporter({
     })();
     return () => { cancelled = true; };
   }, [imageUrl, audioUrl]);
-
-  // ===== 取得音訊長度 =====
-  useEffect(() => {
-    const audio = new Audio();
-    audio.src = audioUrl;
-    audio.addEventListener("loadedmetadata", () => {
-      setAudioDuration(Math.min(audio.duration, 60));
-    });
-    audio.load();
-  }, [audioUrl]);
 
   // ===== MP3 下載 =====
   const downloadAudio = useCallback(async () => {
@@ -183,23 +171,13 @@ export default function VideoExporter({
     setStatusText("準備素材中...");
 
     try {
-      // 1. 解析歌詞時間軸
-      const duration = audioDuration || 60;
-      const lyricLines = parseLyrics(lyrics, duration).map((l) => ({
-        text: l.text,
-        startTime: l.startTime,
-        endTime: l.endTime,
-        type: l.type,
-      }));
-
-      // 2. 組裝 FormData
+      // 1. 組裝 FormData（傳原始歌詞文字，後端自己解析時間軸）
       setStatusText("上傳素材到伺服器...");
       const form = new FormData();
       form.append("image", imageBlobRef.current, "image.jpg");
       form.append("audio", audioBlobRef.current, "audio.mp3");
       form.append("title", title);
-      form.append("lyrics", JSON.stringify(lyricLines));
-      form.append("duration", String(duration));
+      form.append("lyrics", lyrics);
 
       // 3. 送出到後端 FFmpeg
       setStatusText("伺服器合成 MP4 中（約 10-30 秒）...");
@@ -226,7 +204,7 @@ export default function VideoExporter({
     } finally {
       setExporting(false);
     }
-  }, [materialsReady, audioDuration, lyrics, title]);
+  }, [materialsReady, lyrics, title]);
 
   return (
     <div className="space-y-4">
