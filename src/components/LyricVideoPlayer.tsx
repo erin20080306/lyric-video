@@ -42,41 +42,32 @@ export default function LyricVideoPlayer({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [allImages, setAllImages] = useState<string[]>([]);
 
-  // 初始化圖片：先用第一張，然後透過 API 背景加載更多（避免 Safari CORS 問題）
+  // 初始化圖片
   useEffect(() => {
     const initial = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
     setAllImages(initial);
     setCurrentImageIndex(0);
+  }, [imageUrl, imageUrls]);
 
-    if (initial.length <= 1 && title) {
-      let cancelled = false;
+  // 播放後才背景載入額外圖片（不拖慢初始載入）
+  const extraLoaded = useRef(false);
+  useEffect(() => {
+    if (!isPlaying || extraLoaded.current || allImages.length > 1) return;
+    extraLoaded.current = true;
 
-      const loadExtra = async () => {
-        for (let i = 0; i < 2; i++) {
-          if (cancelled) break;
-          try {
-            const res = await fetch("/api/generate-image", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ theme: title }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (res.ok && !cancelled) {
-              const data = await res.json();
-              if (data.imageUrl) {
-                setAllImages((prev) => [...prev, data.imageUrl]);
-              }
-            }
-          } catch {
-            // 靜默失敗，不影響播放
-          }
-        }
-      };
-
-      loadExtra();
-      return () => { cancelled = true; };
-    }
-  }, [imageUrl, imageUrls, title]);
+    const styles = [
+      "watercolor painting, soft gradients",
+      "fantasy landscape, magical lighting",
+    ];
+    styles.forEach((style) => {
+      const seed = Math.floor(Math.random() * 999999);
+      const prompt = encodeURIComponent(`${style}, ${title}, no text, 4k`);
+      const url = `https://image.pollinations.ai/prompt/${prompt}?width=1280&height=720&nologo=true&seed=${seed}`;
+      const img = new Image();
+      img.onload = () => setAllImages((prev) => [...prev, url]);
+      img.src = url;
+    });
+  }, [isPlaying, title, allImages.length]);
 
   // 圖片輪播（每 10 秒切換）
   useEffect(() => {

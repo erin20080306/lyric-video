@@ -121,26 +121,53 @@ export default function VideoExporter({
     }
   }, [imageUrl, title]);
 
-  // ===== MP4/WebM 影片錄製（需要 MediaRecorder）=====
-  const exportVideo = useCallback(async () => {
-    setExporting(true);
-    setProgress(0);
-    stopRef.current = false;
-
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
-      const ctx = canvas.getContext("2d")!;
-
-      const bgImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+  // ===== 載入圖片 =====
+  const loadImg = (src: string, timeout = 10000): Promise<HTMLImageElement | null> =>
+    Promise.race([
+      new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new window.Image();
         img.crossOrigin = "anonymous";
         img.onload = () => resolve(img);
         img.onerror = reject;
-        img.src = imageUrl;
-      });
+        img.src = src;
+      }),
+      new Promise<null>((r) => setTimeout(() => r(null), timeout)),
+    ]).catch(() => null);
 
+  // ===== MP4/WebM 影片錄製（多圖輪播 + 停止即下載）=====
+  const exportVideo = useCallback(async () => {
+    setExporting(true);
+    setProgress(0);
+    setTimeInfo("準備圖片中...");
+    stopRef.current = false;
+
+    try {
+      // 1. 載入主圖 + 2 張額外圖（並行，最多等 8 秒）
+      const bgImages: HTMLImageElement[] = [];
+      const mainImg = await loadImg(imageUrl, 15000);
+      if (!mainImg) throw new Error("無法載入背景圖");
+      bgImages.push(mainImg);
+
+      const extraStyles = [
+        "watercolor painting, soft gradients, ethereal mood",
+        "digital fantasy landscape, magical lighting, epic",
+      ];
+      setTimeInfo("載入額外圖片...");
+      const extras = await Promise.all(
+        extraStyles.map((style) => {
+          const seed = Math.floor(Math.random() * 999999);
+          const p = encodeURIComponent(`${style}, ${title}, no text, 4k`);
+          return loadImg(
+            `https://image.pollinations.ai/prompt/${p}?width=1280&height=720&nologo=true&seed=${seed}`,
+            8000
+          );
+        })
+      );
+      extras.forEach((img) => { if (img) bgImages.push(img); });
+      console.log(`[VideoExporter] ${bgImages.length} 張圖片準備完成`);
+
+      // 2. 載入音訊
+      setTimeInfo("準備音訊...");
       const audio = new Audio();
       audio.crossOrigin = "anonymous";
       audio.src = audioUrl;
@@ -152,8 +179,15 @@ export default function VideoExporter({
       const duration = audio.duration;
       if (!duration || duration <= 0) throw new Error("無法讀取音訊長度");
 
+      // 3. 設定錄製
       const lyricLines = parseLyrics(lyrics, duration);
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext("2d")!;
       const canvasStream = canvas.captureStream(30);
+      const SWITCH_SEC = 10;
+      const FADE_SEC = 2;
 
       let combinedStream: MediaStream;
       try {
@@ -182,91 +216,101 @@ export default function VideoExporter({
       }
       if (!mimeType) throw new Error("瀏覽器不支援影片錄製");
 
-      const recorder = new MediaRecorder(combinedStream, {
-        mimeType,
-        videoBitsPerSecond: 2500000,
-      });
-
+      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
       const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      // 4. 繪圖函式（含多圖 crossfade）
+      const drawCoverFit = (img: HTMLImageElement, alpha: number) => {
+        ctx.globalAlpha = alpha;
+        const ir = img.width / img.height;
+        const cr = canvas.width / canvas.height;
+        let sx = 0, sy = 0, sw = img.width, sh = img.height;
+        if (ir > cr) { sw = img.height * cr; sx = (img.width - sw) / 2; }
+        else { sh = img.width / cr; sy = (img.height - sh) / 2; }
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
       };
 
-      const drawFrame = (currentTime: number) => {
-        const imgRatio = bgImg.width / bgImg.height;
-        const canvasRatio = canvas.width / canvas.height;
-        let sx = 0, sy = 0, sw = bgImg.width, sh = bgImg.height;
-        if (imgRatio > canvasRatio) {
-          sw = bgImg.height * canvasRatio;
-          sx = (bgImg.width - sw) / 2;
+      const drawFrame = (t: number) => {
+        // 背景圖輪播 + crossfade
+        const n = bgImages.length;
+        if (n === 1) {
+          drawCoverFit(bgImages[0], 1);
         } else {
-          sh = bgImg.width / canvasRatio;
-          sy = (bgImg.height - sh) / 2;
-        }
-        ctx.drawImage(bgImg, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+          const slot = t % (SWITCH_SEC * n);
+          const idx = Math.floor(slot / SWITCH_SEC);
+          const nextIdx = (idx + 1) % n;
+          const inSlot = slot - idx * SWITCH_SEC;
 
+          drawCoverFit(bgImages[idx], 1);
+          if (inSlot >= SWITCH_SEC - FADE_SEC) {
+            const fade = (inSlot - (SWITCH_SEC - FADE_SEC)) / FADE_SEC;
+            drawCoverFit(bgImages[nextIdx], fade);
+          }
+        }
+
+        // 暗化 + 漸層
         ctx.fillStyle = "rgba(0,0,0,0.45)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const tg = ctx.createLinearGradient(0, 0, 0, 120);
+        tg.addColorStop(0, "rgba(0,0,0,0.6)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = tg; ctx.fillRect(0, 0, canvas.width, 120);
+        const bg = ctx.createLinearGradient(0, canvas.height - 150, 0, canvas.height);
+        bg.addColorStop(0, "rgba(0,0,0,0)"); bg.addColorStop(1, "rgba(0,0,0,0.8)");
+        ctx.fillStyle = bg; ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
 
-        const topGrad = ctx.createLinearGradient(0, 0, 0, 120);
-        topGrad.addColorStop(0, "rgba(0,0,0,0.6)");
-        topGrad.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = topGrad;
-        ctx.fillRect(0, 0, canvas.width, 120);
-
-        const botGrad = ctx.createLinearGradient(0, canvas.height - 150, 0, canvas.height);
-        botGrad.addColorStop(0, "rgba(0,0,0,0)");
-        botGrad.addColorStop(1, "rgba(0,0,0,0.8)");
-        ctx.fillStyle = botGrad;
-        ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
-
+        // 標題
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(255,255,255,0.8)";
         ctx.font = "bold 28px sans-serif";
         ctx.fillText(title, canvas.width / 2, 50);
 
-        const { current, visible } = getVisibleLines(lyricLines, currentTime, 7);
+        // 歌詞
+        const { current, visible } = getVisibleLines(lyricLines, t, 7);
         const centerY = canvas.height / 2;
-        const lineHeight = 52;
-        const startY = centerY - ((visible.length - 1) / 2) * lineHeight;
-
-        visible.forEach((line, idx) => {
-          const y = startY + idx * lineHeight;
-          const isCurrent = line.id === current?.id;
+        const lineH = 52;
+        const startY = centerY - ((visible.length - 1) / 2) * lineH;
+        visible.forEach((line, i) => {
           if (line.type === "empty") return;
-          if (isCurrent) {
-            ctx.font = "bold 36px sans-serif";
-            ctx.fillStyle = "rgba(255,255,255,1)";
-            ctx.shadowColor = "rgba(92,124,250,0.8)";
-            ctx.shadowBlur = 20;
-          } else {
-            ctx.font = "24px sans-serif";
-            ctx.fillStyle = "rgba(255,255,255,0.45)";
-            ctx.shadowBlur = 0;
-          }
+          const y = startY + i * lineH;
+          const isCur = line.id === current?.id;
+          ctx.font = isCur ? "bold 36px sans-serif" : "24px sans-serif";
+          ctx.fillStyle = isCur ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)";
+          ctx.shadowColor = isCur ? "rgba(92,124,250,0.8)" : "transparent";
+          ctx.shadowBlur = isCur ? 20 : 0;
           ctx.fillText(line.text, canvas.width / 2, y);
           ctx.shadowBlur = 0;
         });
 
-        const barY = canvas.height - 10;
+        // 進度條
         ctx.fillStyle = "rgba(255,255,255,0.2)";
-        ctx.fillRect(0, barY, canvas.width, 6);
-        const prog = duration > 0 ? currentTime / duration : 0;
+        ctx.fillRect(0, canvas.height - 10, canvas.width, 6);
         ctx.fillStyle = "rgba(92,124,250,0.9)";
-        ctx.fillRect(0, barY, canvas.width * prog, 6);
+        ctx.fillRect(0, canvas.height - 10, canvas.width * (t / duration), 6);
       };
 
+      // 5. 開始錄製
+      setTimeInfo("錄製中...");
       return new Promise<void>((resolve) => {
-        recorder.onstop = () => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
           const ext = mimeType.includes("mp4") ? "mp4" : "webm";
           const blob = new Blob(chunks, { type: mimeType });
-          downloadBlob(blob, `${title}.${ext}`);
+          if (blob.size > 0) {
+            downloadBlob(blob, `${title}.${ext}`);
+          }
           setExporting(false);
           setProgress(100);
+          setTimeInfo("");
           resolve();
         };
 
-        recorder.start(100);
+        recorder.onstop = finish;
+
+        recorder.start(200);
         audio.currentTime = 0;
         audio.play();
 
@@ -274,22 +318,27 @@ export default function VideoExporter({
           if (stopRef.current) {
             audio.pause();
             drawFrame(audio.currentTime);
-            setTimeout(() => recorder.stop(), 100);
+            try { recorder.requestData(); } catch {}
+            setTimeout(() => {
+              if (recorder.state === "recording") recorder.stop();
+              else finish();
+            }, 500);
             return;
           }
           const t = audio.currentTime;
-          const remaining = Math.max(0, Math.ceil(duration - t));
-          const rm = Math.floor(remaining / 60);
-          const rs = remaining % 60;
+          const rem = Math.max(0, Math.ceil(duration - t));
           setProgress(Math.round((t / duration) * 100));
-          setTimeInfo(`剩餘 ${rm}:${rs.toString().padStart(2, "0")}`);
+          setTimeInfo(`剩餘 ${Math.floor(rem / 60)}:${(rem % 60).toString().padStart(2, "0")}`);
           drawFrame(t);
           if (t < duration && !audio.ended) {
             requestAnimationFrame(animate);
           } else {
             audio.pause();
             drawFrame(duration);
-            setTimeout(() => recorder.stop(), 200);
+            setTimeout(() => {
+              if (recorder.state === "recording") recorder.stop();
+              else finish();
+            }, 300);
           }
         };
         animate();
@@ -298,6 +347,7 @@ export default function VideoExporter({
       console.error("[VideoExporter]", err);
       alert("影片匯出失敗：" + (err instanceof Error ? err.message : "未知錯誤"));
       setExporting(false);
+      setTimeInfo("");
     }
   }, [imageUrl, audioUrl, lyrics, title]);
 
