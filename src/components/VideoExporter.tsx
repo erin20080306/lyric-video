@@ -94,6 +94,7 @@ export default function VideoExporter({
   const [statusText, setStatusText] = useState("");
   const [downloadingMp3, setDownloadingMp3] = useState(false);
   const [materialsReady, setMaterialsReady] = useState(false);
+  const [audioDuration, setAudioDuration] = useState(0);
   const imageBlobRef = useRef<Blob | null>(null);
   const audioBlobRef = useRef<Blob | null>(null);
 
@@ -129,6 +130,16 @@ export default function VideoExporter({
     })();
     return () => { cancelled = true; };
   }, [imageUrl, audioUrl]);
+
+  // ===== 偵測音訊長度（與預覽播放器一致）=====
+  useEffect(() => {
+    const audio = new Audio();
+    audio.src = audioUrl;
+    audio.addEventListener("loadedmetadata", () => {
+      setAudioDuration(audio.duration);
+    });
+    audio.load();
+  }, [audioUrl]);
 
   // ===== MP3 下載 =====
   const downloadAudio = useCallback(async () => {
@@ -178,6 +189,9 @@ export default function VideoExporter({
       form.append("audio", audioBlobRef.current, "audio.mp3");
       form.append("title", title);
       form.append("lyrics", lyrics);
+      if (audioDuration > 0) {
+        form.append("duration", String(audioDuration));
+      }
 
       // 3. 送出到後端 FFmpeg
       setStatusText("伺服器合成 MP4 中（約 10-30 秒）...");
@@ -204,7 +218,7 @@ export default function VideoExporter({
     } finally {
       setExporting(false);
     }
-  }, [materialsReady, lyrics, title]);
+  }, [materialsReady, audioDuration, lyrics, title]);
 
   return (
     <div className="space-y-4">

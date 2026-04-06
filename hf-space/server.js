@@ -58,6 +58,7 @@ function parseLyrics(lyricsText, totalDuration) {
     }
   }
 
+  // 與前端 lyrics-parser.ts 完全相同的權重
   const getWeight = (type) => {
     switch (type) {
       case "title": return 1.5;
@@ -102,16 +103,16 @@ function generateASS(title, lyrics, duration) {
   let ass = `[Script Info]
 Title: ${title}
 ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
+PlayResX: 960
+PlayResY: 540
 WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Title,Noto Sans CJK TC,30,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,8,10,10,30,1
-Style: Current,Noto Sans CJK TC,38,&H00FFFFFF,&H000000FF,&H00FA5C5C,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,10,1
-Style: Dim,Noto Sans CJK TC,26,&H80FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,5,10,10,10,1
-Style: Section,Noto Sans CJK TC,24,&H6000D7FF,&H000000FF,&H00000000,&H80000000,0,-1,0,0,100,100,0,0,1,1,1,5,10,10,10,1
+Style: Title,Noto Sans CJK TC,24,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,8,10,10,30,1
+Style: Current,Noto Sans CJK TC,30,&H00FFFFFF,&H000000FF,&H00FA5C5C,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,10,1
+Style: Dim,Noto Sans CJK TC,20,&H80FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,5,10,10,10,1
+Style: Section,Noto Sans CJK TC,18,&H6000D7FF,&H000000FF,&H00000000,&H80000000,0,-1,0,0,100,100,0,0,1,1,1,5,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -176,11 +177,12 @@ app.post(
       fs.renameSync(imageFile.path, imgPath);
       fs.renameSync(audioFile.path, audioPath);
 
-      // 用 ffprobe 偵測真正的音訊長度
+      // 優先使用前端傳來的 duration（與預覽播放器一致）
+      const frontendDuration = parseFloat(durationStr) || 0;
       const probeDuration = await getAudioDuration(audioPath);
-      const fallbackDuration = parseFloat(durationStr) || 60;
-      const duration = probeDuration > 0 ? probeDuration : fallbackDuration;
-      console.log(`[${id}] 音訊長度: ${duration.toFixed(1)}s (probe=${probeDuration.toFixed(1)}, fallback=${fallbackDuration})`);
+      // 前端 duration 優先，因為它跟預覽播放器用的是同一個值
+      const duration = frontendDuration > 0 ? frontendDuration : (probeDuration > 0 ? probeDuration : 60);
+      console.log(`[${id}] 音訊長度: 使用=${duration.toFixed(1)}s (前端=${frontendDuration.toFixed(1)}, ffprobe=${probeDuration.toFixed(1)})`);
 
       // 後端解析歌詞時間軸（用真正的音訊長度）
       let lyrics = [];
@@ -203,14 +205,14 @@ app.post(
       console.log(`[${id}] 歌詞: ${lyrics.filter(l => l.type === "lyric").length} 行`);
 
       // 生成 ASS 字幕
-      let vfFilter = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2";
+      let vfFilter = "scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2";
       if (lyrics.length > 0) {
         const assContent = generateASS(title, lyrics, duration);
         const assPath = path.join(tmp, "lyrics.ass");
         fs.writeFileSync(assPath, assContent, "utf-8");
-        // ASS 路徑需要轉義冒號和反斜線
+        console.log(`[${id}] ASS 字幕內容:\n${assContent.slice(0, 500)}...`);
         const escapedAssPath = assPath.replace(/\\/g, "/").replace(/:/g, "\\:");
-        vfFilter = `scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,ass='${escapedAssPath}'`;
+        vfFilter = `scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,ass='${escapedAssPath}'`;
       }
 
       const outputPath = path.join(tmp, "output.mp4");
@@ -223,11 +225,11 @@ app.post(
         "-vf", vfFilter,
         "-c:v", "libx264",
         "-tune", "stillimage",
-        "-r", "10",
-        "-crf", "25",
-        "-preset", "fast",
+        "-r", "5",
+        "-crf", "30",
+        "-preset", "ultrafast",
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "96k",
         "-pix_fmt", "yuv420p",
         "-shortest",
         "-movflags", "+faststart",
