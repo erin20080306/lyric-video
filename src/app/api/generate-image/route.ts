@@ -15,32 +15,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 嘗試用 Pollinations.ai 生成 AI 圖片
-    try {
-      const seed = Math.floor(Math.random() * 999999);
-      const aiPrompt = `beautiful cinematic music album cover art, ${theme}, dreamy atmosphere, vibrant colors, aesthetic, no text, no words, no letters, 4k`;
-      const encoded = encodeURIComponent(aiPrompt);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&seed=${seed}`;
+    // 嘗試用 Pollinations.ai 生成 AI 圖片（含重試）
+    const seed = Math.floor(Math.random() * 999999);
+    const aiPrompt = `beautiful cinematic music album cover art, ${theme}, dreamy atmosphere, vibrant colors, aesthetic, no text, no words, no letters, 4k`;
+    const encoded = encodeURIComponent(aiPrompt);
 
-      console.log("[Image] 使用 Pollinations.ai 生成圖片...");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const trySeed = seed + attempt;
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&seed=${trySeed}`;
 
-      const imgRes = await fetch(pollinationsUrl, {
-        signal: AbortSignal.timeout(30000),
-      });
+        console.log(`[Image] Pollinations.ai 嘗試 #${attempt + 1}...`);
 
-      if (imgRes.ok) {
-        const buffer = await imgRes.arrayBuffer();
-        const base64 = Buffer.from(buffer).toString("base64");
-        const contentType = imgRes.headers.get("content-type") || "image/jpeg";
-        const imageUrl = `data:${contentType};base64,${base64}`;
+        const imgRes = await fetch(pollinationsUrl, {
+          signal: AbortSignal.timeout(30000),
+        });
 
-        console.log("[Image] AI 圖片生成完成, size:", base64.length);
-        return NextResponse.json({ imageUrl });
+        if (imgRes.ok) {
+          const buffer = await imgRes.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString("base64");
+          const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+          const imageUrl = `data:${contentType};base64,${base64}`;
+
+          console.log("[Image] AI 圖片生成完成, size:", base64.length);
+          return NextResponse.json({ imageUrl });
+        }
+
+        if (imgRes.status === 429) {
+          console.warn(`[Image] 被限速 (429)，等待 ${(attempt + 1) * 3} 秒後重試...`);
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 3000));
+          continue;
+        }
+
+        console.warn("[Image] Pollinations 回傳:", imgRes.status);
+        break;
+      } catch (aiErr) {
+        console.warn(`[Image] 嘗試 #${attempt + 1} 失敗:`, aiErr);
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
       }
-
-      console.warn("[Image] Pollinations 回傳非 200:", imgRes.status);
-    } catch (aiErr) {
-      console.warn("[Image] AI 圖片生成失敗，使用 fallback:", aiErr);
     }
 
     // Fallback：SVG 漸層背景
