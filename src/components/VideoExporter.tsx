@@ -84,32 +84,63 @@ export default function VideoExporter({
     setSupportsVideo(canRecordVideo());
   }, []);
 
-  // ===== 伺服器端合成 MP4（iPhone 等不支援 MediaRecorder 的裝置）=====
-  const createServerVideo = useCallback(async () => {
+  // ===== 客戶端合成 MP4（iPhone 等不支援 MediaRecorder 的裝置）=====
+  const createClientVideo = useCallback(async () => {
     setCreatingVideo(true);
     try {
-      const res = await fetch("/api/export-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: imageUrl,
-          audioBase64: audioUrl,
-        }),
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile } = await import("@ffmpeg/util");
+      const ffmpeg = new FFmpeg();
+
+      setTimeInfo("載入轉檔工具（首次約 10 秒）...");
+      await ffmpeg.load({
+        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "影片合成失敗");
-      }
+      setTimeInfo("準備素材...");
+      // 寫入圖片
+      const imgBlob = dataUrlToBlob(imageUrl);
+      await ffmpeg.writeFile("img.jpg", await fetchFile(imgBlob));
 
-      const data = await res.json();
-      const blob = dataUrlToBlob(data.videoUrl);
-      await downloadOrShare(blob, `${title}.mp4`);
+      // 寫入音訊
+      let audioBlob: Blob;
+      if (audioUrl.startsWith("data:")) {
+        audioBlob = dataUrlToBlob(audioUrl);
+      } else {
+        const res = await fetch(audioUrl);
+        audioBlob = await res.blob();
+      }
+      const audioExt = audioBlob.type.includes("wav") ? "wav" : "mp3";
+      await ffmpeg.writeFile(`audio.${audioExt}`, await fetchFile(audioBlob));
+
+      setTimeInfo("合成 MP4 中...");
+      await ffmpeg.exec([
+        "-loop", "1",
+        "-i", "img.jpg",
+        "-i", `audio.${audioExt}`,
+        "-c:v", "libx264",
+        "-tune", "stillimage",
+        "-r", "1",
+        "-crf", "28",
+        "-preset", "fast",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-pix_fmt", "yuv420p",
+        "-shortest",
+        "-movflags", "+faststart",
+        "-y", "output.mp4",
+      ]);
+
+      const data = await ffmpeg.readFile("output.mp4");
+      const mp4Blob = new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
+      await downloadOrShare(mp4Blob, `${title}.mp4`);
     } catch (err) {
-      console.error("[伺服器MP4]", err);
-      alert("影片合成失敗：" + (err instanceof Error ? err.message : "未知錯誤"));
+      console.error("[ffmpeg.wasm 合成失敗]", err);
+      alert("影片合成失敗：" + (err instanceof Error ? err.message : "未知錯誤") + "\n請改用「下載 MP3 + 背景圖」搭配剪映合成");
     } finally {
       setCreatingVideo(false);
+      setTimeInfo("");
     }
   }, [imageUrl, audioUrl, title]);
 
@@ -337,25 +368,36 @@ export default function VideoExporter({
           const blob = new Blob(chunks, { type: mimeType });
           if (blob.size === 0) { setExporting(false); resolve(); return; }
 
-          // WebM → MP4 轉檔（iPhone/LINE/FB 都支援 MP4）
+          // WebM → MP4 轉檔（瀏覽器內完成，不需伺服器）
           if (mimeType.includes("webm")) {
-            setTimeInfo("轉檔為 MP4 中（約 10-30 秒）...");
+            setTimeInfo("載入轉檔工具中...");
             try {
-              const form = new FormData();
-              form.append("video", blob, "video.webm");
-              const res = await fetch("/api/convert-video", { method: "POST", body: form });
-              if (res.ok) {
-                const mp4Blob = await res.blob();
-                await downloadOrShare(mp4Blob, `${title}.mp4`);
-              } else {
-                const errData = await res.json().catch(() => ({ error: "未知錯誤" }));
-                console.error("[轉檔失敗]", errData);
-                alert(`MP4 轉檔失敗：${errData.error}\n先下載 WebM 格式`);
-                await downloadOrShare(blob, `${title}.webm`);
-              }
+              const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+              const { fetchFile } = await import("@ffmpeg/util");
+              const ffmpeg = new FFmpeg();
+              await ffmpeg.load({
+                coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+                wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+              });
+              setTimeInfo("轉檔為 MP4 中...");
+              await ffmpeg.writeFile("input.webm", await fetchFile(blob));
+              await ffmpeg.exec([
+                "-i", "input.webm",
+                "-c:v", "libx264",
+                "-crf", "23",
+                "-preset", "fast",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-y", "output.mp4",
+              ]);
+              const data = await ffmpeg.readFile("output.mp4");
+              const mp4Blob = new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
+              await downloadOrShare(mp4Blob, `${title}.mp4`);
             } catch (e) {
-              console.error("[轉檔請求失敗]", e);
-              alert("MP4 轉檔請求失敗，先下載 WebM 格式");
+              console.error("[ffmpeg.wasm 轉檔失敗]", e);
+              alert("MP4 轉檔失敗，先下載 WebM 格式");
               await downloadOrShare(blob, `${title}.webm`);
             }
           } else {
@@ -488,10 +530,10 @@ export default function VideoExporter({
           {creatingVideo ? (
             <div className="flex items-center gap-3">
               <Loader2 className="w-5 h-5 text-green-400 animate-spin" />
-              <span className="text-sm text-gray-300">伺服器合成影片中，請稍候（約 30 秒）...</span>
+              <span className="text-sm text-gray-300">{timeInfo || "合成影片中..."}</span>
             </div>
           ) : (
-            <button onClick={createServerVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
+            <button onClick={createClientVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
               <Film className="w-5 h-5" />
               合成 MP4 影片（可分享 FB）
             </button>
