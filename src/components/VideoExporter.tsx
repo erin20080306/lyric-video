@@ -219,10 +219,10 @@ export default function VideoExporter({
       // 3. 設定錄製
       const lyricLines = parseLyrics(lyrics, duration);
       const canvas = document.createElement("canvas");
-      canvas.width = 960;
-      canvas.height = 540;
+      canvas.width = 1280;
+      canvas.height = 720;
       const ctx = canvas.getContext("2d")!;
-      const canvasStream = canvas.captureStream(10);
+      const canvasStream = canvas.captureStream(24);
       const SWITCH_SEC = 10;
       const FADE_SEC = 2;
 
@@ -253,7 +253,7 @@ export default function VideoExporter({
       }
       if (!mimeType) throw new Error("瀏覽器不支援影片錄製");
 
-      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 500000 });
+      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 1500000 });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
@@ -331,13 +331,31 @@ export default function VideoExporter({
       setTimeInfo("錄製中...");
       return new Promise<void>((resolve) => {
         let done = false;
-        const finish = () => {
+        const finish = async () => {
           if (done) return;
           done = true;
-          const ext = mimeType.includes("mp4") ? "mp4" : "webm";
           const blob = new Blob(chunks, { type: mimeType });
-          if (blob.size > 0) {
-            downloadOrShare(blob, `${title}.${ext}`);
+          if (blob.size === 0) { setExporting(false); resolve(); return; }
+
+          // WebM → MP4 轉檔（iPhone/LINE/FB 都支援 MP4）
+          if (mimeType.includes("webm")) {
+            setTimeInfo("轉檔為 MP4 中...");
+            try {
+              const form = new FormData();
+              form.append("video", blob, "video.webm");
+              const res = await fetch("/api/convert-video", { method: "POST", body: form });
+              if (res.ok) {
+                const mp4Blob = await res.blob();
+                await downloadOrShare(mp4Blob, `${title}.mp4`);
+              } else {
+                // 轉檔失敗，直接下載 WebM
+                await downloadOrShare(blob, `${title}.webm`);
+              }
+            } catch {
+              await downloadOrShare(blob, `${title}.webm`);
+            }
+          } else {
+            await downloadOrShare(blob, `${title}.mp4`);
           }
           setExporting(false);
           setProgress(100);
