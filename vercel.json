@@ -1,13 +1,5 @@
 {
   "functions": {
-    "src/app/api/convert-video/route.ts": {
-      "maxDuration": 60,
-      "memory": 1024
-    },
-    "src/app/api/export-video/route.ts": {
-      "maxDuration": 60,
-      "memory": 1024
-    },
     "src/app/api/generate-music/route.ts": {
       "maxDuration": 60,
       "memory": 1024

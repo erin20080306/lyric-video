@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Download, Loader2, Square, Music, ImageIcon, Film } from "lucide-react";
-import { parseLyrics, getVisibleLines } from "@/lib/lyrics-parser";
+import { Loader2, Music, ImageIcon, Film } from "lucide-react";
+import { parseLyrics } from "@/lib/lyrics-parser";
+
+// ===== 後端 FFmpeg 伺服器 URL =====
+const VIDEO_SERVER =
+  process.env.NEXT_PUBLIC_VIDEO_SERVER_URL || "https://lyric-video-server.onrender.com";
 
 interface VideoExporterProps {
   imageUrl: string;
@@ -11,7 +15,9 @@ interface VideoExporterProps {
   title: string;
 }
 
-/** 把 base64 data URL 轉成 Blob */
+// ===== 工具函式 =====
+
+/** base64 data URL → Blob */
 function dataUrlToBlob(dataUrl: string): Blob {
   const [header, base64] = dataUrl.split(",");
   const mime = header.match(/:(.*?);/)?.[1] || "application/octet-stream";
@@ -23,22 +29,15 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
 /** 手機 + 桌面通用下載/分享 */
 async function downloadOrShare(blob: Blob, filename: string) {
-  // 手機優先用 Web Share API（可直接分享到 FB/IG/LINE）
   const file = new File([blob], filename, { type: blob.type });
   if (navigator.share && navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({
-        title: filename,
-        files: [file],
-      });
+      await navigator.share({ title: filename, files: [file] });
       return;
     } catch (e) {
-      // 使用者取消分享，fallback 到下載
       if ((e as Error).name === "AbortError") return;
     }
   }
-
-  // fallback: <a download>
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -46,26 +45,46 @@ async function downloadOrShare(blob: Blob, filename: string) {
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 1000);
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 }
 
-function canRecordVideo(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const canvas = document.createElement("canvas");
-    const hasCapture = typeof canvas.captureStream === "function";
-    const hasRecorder = typeof MediaRecorder !== "undefined";
-    if (!hasCapture || !hasRecorder) return false;
-    const testTypes = ["video/webm", "video/mp4"];
-    return testTypes.some((t) => MediaRecorder.isTypeSupported(t));
-  } catch {
-    return false;
-  }
+/** 圖片縮放到 720p（1280×720）以內，回傳 Blob */
+async function resizeImageTo720p(src: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const MAX_W = 1280, MAX_H = 720;
+      let w = img.width, h = img.height;
+      if (w > MAX_W || h > MAX_H) {
+        const ratio = Math.min(MAX_W / w, MAX_H / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("圖片壓縮失敗"))),
+        "image/jpeg",
+        0.85
+      );
+    };
+    img.onerror = () => reject(new Error("圖片載入失敗"));
+    img.src = src;
+  });
 }
 
+// ===== 素材快取 =====
+const materialCache = new Map<string, { imageBlob: Blob; audioBlob: Blob }>();
+
+function getCacheKey(imageUrl: string, audioUrl: string): string {
+  return `${imageUrl.slice(0, 50)}_${audioUrl.slice(0, 50)}`;
+}
+
+// ===== 主元件 =====
 export default function VideoExporter({
   imageUrl,
   audioUrl,
@@ -73,96 +92,71 @@ export default function VideoExporter({
   title,
 }: VideoExporterProps) {
   const [exporting, setExporting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [timeInfo, setTimeInfo] = useState("");
+  const [statusText, setStatusText] = useState("");
   const [downloadingMp3, setDownloadingMp3] = useState(false);
-  const [creatingVideo, setCreatingVideo] = useState(false);
-  const stopRef = useRef(false);
-  const [supportsVideo, setSupportsVideo] = useState(true);
+  const [materialsReady, setMaterialsReady] = useState(false);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const imageBlobRef = useRef<Blob | null>(null);
+  const audioBlobRef = useRef<Blob | null>(null);
 
+  // ===== 素材預處理（進入頁面就開始，快取避免重複）=====
   useEffect(() => {
-    setSupportsVideo(canRecordVideo());
-  }, []);
-
-  // ===== 客戶端合成 MP4（iPhone 等不支援 MediaRecorder 的裝置）=====
-  const createClientVideo = useCallback(async () => {
-    setCreatingVideo(true);
-    try {
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile } = await import("@ffmpeg/util");
-      const ffmpeg = new FFmpeg();
-
-      setTimeInfo("載入轉檔工具（首次約 10 秒）...");
-      await ffmpeg.load({
-        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
-        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
-      });
-
-      setTimeInfo("準備素材...");
-      // 寫入圖片
-      const imgBlob = dataUrlToBlob(imageUrl);
-      await ffmpeg.writeFile("img.jpg", await fetchFile(imgBlob));
-
-      // 寫入音訊
-      let audioBlob: Blob;
-      if (audioUrl.startsWith("data:")) {
-        audioBlob = dataUrlToBlob(audioUrl);
-      } else {
-        const res = await fetch(audioUrl);
-        audioBlob = await res.blob();
-      }
-      const audioExt = audioBlob.type.includes("wav") ? "wav" : "mp3";
-      await ffmpeg.writeFile(`audio.${audioExt}`, await fetchFile(audioBlob));
-
-      setTimeInfo("合成 MP4 中...");
-      await ffmpeg.exec([
-        "-loop", "1",
-        "-i", "img.jpg",
-        "-i", `audio.${audioExt}`,
-        "-c:v", "libx264",
-        "-tune", "stillimage",
-        "-r", "1",
-        "-crf", "28",
-        "-preset", "fast",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-pix_fmt", "yuv420p",
-        "-shortest",
-        "-movflags", "+faststart",
-        "-y", "output.mp4",
-      ]);
-
-      const data = await ffmpeg.readFile("output.mp4");
-      const mp4Blob = new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
-      await downloadOrShare(mp4Blob, `${title}.mp4`);
-    } catch (err) {
-      console.error("[ffmpeg.wasm 合成失敗]", err);
-      alert("影片合成失敗：" + (err instanceof Error ? err.message : "未知錯誤") + "\n請改用「下載 MP3 + 背景圖」搭配剪映合成");
-    } finally {
-      setCreatingVideo(false);
-      setTimeInfo("");
+    const key = getCacheKey(imageUrl, audioUrl);
+    const cached = materialCache.get(key);
+    if (cached) {
+      imageBlobRef.current = cached.imageBlob;
+      audioBlobRef.current = cached.audioBlob;
+      setMaterialsReady(true);
+      return;
     }
-  }, [imageUrl, audioUrl, title]);
 
-  // ===== MP3 下載（手機 + 桌面都能用）=====
+    let cancelled = false;
+    (async () => {
+      try {
+        // 並行處理圖片縮放 + 音訊下載
+        const [imgBlob, audioBlob] = await Promise.all([
+          resizeImageTo720p(imageUrl),
+          audioUrl.startsWith("data:")
+            ? Promise.resolve(dataUrlToBlob(audioUrl))
+            : fetch(audioUrl).then((r) => r.blob()),
+        ]);
+        if (cancelled) return;
+        imageBlobRef.current = imgBlob;
+        audioBlobRef.current = audioBlob;
+        materialCache.set(key, { imageBlob: imgBlob, audioBlob: audioBlob });
+        setMaterialsReady(true);
+      } catch (e) {
+        console.error("[素材預處理]", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [imageUrl, audioUrl]);
+
+  // ===== 取得音訊長度 =====
+  useEffect(() => {
+    const audio = new Audio();
+    audio.src = audioUrl;
+    audio.addEventListener("loadedmetadata", () => {
+      setAudioDuration(Math.min(audio.duration, 60));
+    });
+    audio.load();
+  }, [audioUrl]);
+
+  // ===== MP3 下載 =====
   const downloadAudio = useCallback(async () => {
     setDownloadingMp3(true);
     try {
-      let blob: Blob;
-      if (audioUrl.startsWith("data:")) {
-        blob = dataUrlToBlob(audioUrl);
-      } else {
-        const res = await fetch(audioUrl);
-        blob = await res.blob();
-      }
-      // 確保 MIME 是 audio/mpeg
-      if (!blob.type.includes("audio")) {
-        blob = new Blob([blob], { type: "audio/mpeg" });
-      }
-      downloadOrShare(blob, `${title}.mp3`);
-    } catch (err) {
-      console.error("[下載MP3]", err);
-      alert("MP3 下載失敗，請長按播放器試試");
+      const blob: Blob = audioBlobRef.current ?? (
+        audioUrl.startsWith("data:")
+          ? dataUrlToBlob(audioUrl)
+          : await fetch(audioUrl).then((r) => r.blob())
+      );
+      await downloadOrShare(
+        blob.type.includes("audio") ? blob : new Blob([blob], { type: "audio/mpeg" }),
+        `${title}.mp3`
+      );
+    } catch {
+      alert("MP3 下載失敗");
     } finally {
       setDownloadingMp3(false);
     }
@@ -171,302 +165,72 @@ export default function VideoExporter({
   // ===== 背景圖下載 =====
   const downloadImage = useCallback(() => {
     try {
-      let blob: Blob;
-      if (imageUrl.startsWith("data:")) {
-        blob = dataUrlToBlob(imageUrl);
-      } else {
-        // 不太可能走到這裡
-        const a = document.createElement("a");
-        a.href = imageUrl;
-        a.download = `${title}-背景圖.jpg`;
-        a.click();
-        return;
-      }
+      const blob = imageBlobRef.current || dataUrlToBlob(imageUrl);
       downloadOrShare(blob, `${title}-背景圖.jpg`);
-    } catch (err) {
-      console.error("[下載圖片]", err);
+    } catch {
       alert("圖片下載失敗");
     }
   }, [imageUrl, title]);
 
-  // ===== 載入圖片 =====
-  const loadImg = (src: string, timeout = 10000): Promise<HTMLImageElement | null> =>
-    Promise.race([
-      new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new window.Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = src;
-      }),
-      new Promise<null>((r) => setTimeout(() => r(null), timeout)),
-    ]).catch(() => null);
+  // ===== 匯出 MP4（後端 FFmpeg）=====
+  const exportMP4 = useCallback(async () => {
+    if (!materialsReady || !imageBlobRef.current || !audioBlobRef.current) {
+      alert("素材準備中，請稍候再試");
+      return;
+    }
 
-  // ===== MP4/WebM 影片錄製（多圖輪播 + 停止即下載）=====
-  const exportVideo = useCallback(async () => {
     setExporting(true);
-    setProgress(0);
-    setTimeInfo("準備圖片中...");
-    stopRef.current = false;
+    setStatusText("準備素材中...");
 
     try {
-      // 1. 載入主圖 + 2 張額外圖（並行，最多等 8 秒）
-      const bgImages: HTMLImageElement[] = [];
-      const mainImg = await loadImg(imageUrl, 15000);
-      if (!mainImg) throw new Error("無法載入背景圖");
-      bgImages.push(mainImg);
+      // 1. 解析歌詞時間軸
+      const duration = audioDuration || 60;
+      const lyricLines = parseLyrics(lyrics, duration).map((l) => ({
+        text: l.text,
+        startTime: l.startTime,
+        endTime: l.endTime,
+        type: l.type,
+      }));
 
-      const extraStyles = [
-        "watercolor painting, soft gradients, ethereal mood",
-        "digital fantasy landscape, magical lighting, epic",
-      ];
-      setTimeInfo("載入額外圖片...");
-      const extras = await Promise.all(
-        extraStyles.map((style) => {
-          const seed = Math.floor(Math.random() * 999999);
-          const p = encodeURIComponent(`${style}, ${title}, no text, 4k`);
-          return loadImg(
-            `https://image.pollinations.ai/prompt/${p}?width=1280&height=720&nologo=true&seed=${seed}`,
-            8000
-          );
-        })
-      );
-      extras.forEach((img) => { if (img) bgImages.push(img); });
-      console.log(`[VideoExporter] ${bgImages.length} 張圖片準備完成`);
+      // 2. 組裝 FormData
+      setStatusText("上傳素材到伺服器...");
+      const form = new FormData();
+      form.append("image", imageBlobRef.current, "image.jpg");
+      form.append("audio", audioBlobRef.current, "audio.mp3");
+      form.append("title", title);
+      form.append("lyrics", JSON.stringify(lyricLines));
+      form.append("duration", String(duration));
 
-      // 2. 載入音訊
-      setTimeInfo("準備音訊...");
-      const audio = new Audio();
-      audio.crossOrigin = "anonymous";
-      audio.src = audioUrl;
-      await new Promise<void>((resolve) => {
-        audio.oncanplaythrough = () => resolve();
-        audio.load();
+      // 3. 送出到後端 FFmpeg
+      setStatusText("伺服器合成 MP4 中（約 10-30 秒）...");
+      const res = await fetch(`${VIDEO_SERVER}/api/create-video`, {
+        method: "POST",
+        body: form,
       });
 
-      const duration = audio.duration;
-      if (!duration || duration <= 0) throw new Error("無法讀取音訊長度");
-
-      // 3. 設定錄製
-      const lyricLines = parseLyrics(lyrics, duration);
-      const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
-      const ctx = canvas.getContext("2d")!;
-      const canvasStream = canvas.captureStream(24);
-      const SWITCH_SEC = 10;
-      const FADE_SEC = 2;
-
-      let combinedStream: MediaStream;
-      try {
-        const audioCtx = new AudioContext();
-        const source = audioCtx.createMediaElementSource(audio);
-        const dest = audioCtx.createMediaStreamDestination();
-        source.connect(dest);
-        source.connect(audioCtx.destination);
-        combinedStream = new MediaStream([
-          ...canvasStream.getVideoTracks(),
-          ...dest.stream.getAudioTracks(),
-        ]);
-      } catch {
-        combinedStream = canvasStream;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "伺服器錯誤" }));
+        throw new Error(err.error || `HTTP ${res.status}`);
       }
 
-      const mimeTypes = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm",
-        "video/mp4",
-      ];
-      let mimeType = "";
-      for (const mt of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
-      }
-      if (!mimeType) throw new Error("瀏覽器不支援影片錄製");
-
-      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 1500000 });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-      // 4. 繪圖函式（含多圖 crossfade）
-      const drawCoverFit = (img: HTMLImageElement, alpha: number) => {
-        ctx.globalAlpha = alpha;
-        const ir = img.width / img.height;
-        const cr = canvas.width / canvas.height;
-        let sx = 0, sy = 0, sw = img.width, sh = img.height;
-        if (ir > cr) { sw = img.height * cr; sx = (img.width - sw) / 2; }
-        else { sh = img.width / cr; sy = (img.height - sh) / 2; }
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-        ctx.globalAlpha = 1;
-      };
-
-      const drawFrame = (t: number) => {
-        // 背景圖輪播 + crossfade
-        const n = bgImages.length;
-        if (n === 1) {
-          drawCoverFit(bgImages[0], 1);
-        } else {
-          const slot = t % (SWITCH_SEC * n);
-          const idx = Math.floor(slot / SWITCH_SEC);
-          const nextIdx = (idx + 1) % n;
-          const inSlot = slot - idx * SWITCH_SEC;
-
-          drawCoverFit(bgImages[idx], 1);
-          if (inSlot >= SWITCH_SEC - FADE_SEC) {
-            const fade = (inSlot - (SWITCH_SEC - FADE_SEC)) / FADE_SEC;
-            drawCoverFit(bgImages[nextIdx], fade);
-          }
-        }
-
-        // 暗化 + 漸層
-        ctx.fillStyle = "rgba(0,0,0,0.45)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const tg = ctx.createLinearGradient(0, 0, 0, 120);
-        tg.addColorStop(0, "rgba(0,0,0,0.6)"); tg.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = tg; ctx.fillRect(0, 0, canvas.width, 120);
-        const bg = ctx.createLinearGradient(0, canvas.height - 150, 0, canvas.height);
-        bg.addColorStop(0, "rgba(0,0,0,0)"); bg.addColorStop(1, "rgba(0,0,0,0.8)");
-        ctx.fillStyle = bg; ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
-
-        // 標題
-        ctx.textAlign = "center";
-        ctx.fillStyle = "rgba(255,255,255,0.8)";
-        ctx.font = "bold 28px sans-serif";
-        ctx.fillText(title, canvas.width / 2, 50);
-
-        // 歌詞
-        const { current, visible } = getVisibleLines(lyricLines, t, 7);
-        const centerY = canvas.height / 2;
-        const lineH = 52;
-        const startY = centerY - ((visible.length - 1) / 2) * lineH;
-        visible.forEach((line, i) => {
-          if (line.type === "empty") return;
-          const y = startY + i * lineH;
-          const isCur = line.id === current?.id;
-          ctx.font = isCur ? "bold 36px sans-serif" : "24px sans-serif";
-          ctx.fillStyle = isCur ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)";
-          ctx.shadowColor = isCur ? "rgba(92,124,250,0.8)" : "transparent";
-          ctx.shadowBlur = isCur ? 20 : 0;
-          ctx.fillText(line.text, canvas.width / 2, y);
-          ctx.shadowBlur = 0;
-        });
-
-        // 進度條
-        ctx.fillStyle = "rgba(255,255,255,0.2)";
-        ctx.fillRect(0, canvas.height - 10, canvas.width, 6);
-        ctx.fillStyle = "rgba(92,124,250,0.9)";
-        ctx.fillRect(0, canvas.height - 10, canvas.width * (t / duration), 6);
-      };
-
-      // 5. 開始錄製
-      setTimeInfo("錄製中...");
-      return new Promise<void>((resolve) => {
-        let done = false;
-        const finish = async () => {
-          if (done) return;
-          done = true;
-          const blob = new Blob(chunks, { type: mimeType });
-          if (blob.size === 0) { setExporting(false); resolve(); return; }
-
-          // WebM → MP4 轉檔（瀏覽器內完成，不需伺服器）
-          if (mimeType.includes("webm")) {
-            setTimeInfo("載入轉檔工具中...");
-            try {
-              const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-              const { fetchFile } = await import("@ffmpeg/util");
-              const ffmpeg = new FFmpeg();
-              await ffmpeg.load({
-                coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
-                wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
-              });
-              setTimeInfo("轉檔為 MP4 中...");
-              await ffmpeg.writeFile("input.webm", await fetchFile(blob));
-              await ffmpeg.exec([
-                "-i", "input.webm",
-                "-c:v", "libx264",
-                "-crf", "23",
-                "-preset", "fast",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                "-y", "output.mp4",
-              ]);
-              const data = await ffmpeg.readFile("output.mp4");
-              const mp4Blob = new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
-              await downloadOrShare(mp4Blob, `${title}.mp4`);
-            } catch (e) {
-              console.error("[ffmpeg.wasm 轉檔失敗]", e);
-              alert("MP4 轉檔失敗，先下載 WebM 格式");
-              await downloadOrShare(blob, `${title}.webm`);
-            }
-          } else {
-            await downloadOrShare(blob, `${title}.mp4`);
-          }
-          setExporting(false);
-          setProgress(100);
-          setTimeInfo("");
-          resolve();
-        };
-
-        recorder.onstop = finish;
-
-        recorder.start(200);
-        audio.currentTime = 0;
-        audio.play();
-
-        let animStopped = false;
-        const stopRecording = () => {
-          if (animStopped) return;
-          animStopped = true;
-          audio.pause();
-          drawFrame(audio.currentTime);
-          try { recorder.requestData(); } catch {}
-          // 立即停止
-          try {
-            if (recorder.state === "recording") recorder.stop();
-          } catch {
-            finish();
-          }
-        };
-
-        const animate = () => {
-          if (animStopped) return;
-          if (stopRef.current) {
-            stopRecording();
-            return;
-          }
-          const t = audio.currentTime;
-          const rem = Math.max(0, Math.ceil(duration - t));
-          setProgress(Math.round((t / duration) * 100));
-          setTimeInfo(`剩餘 ${Math.floor(rem / 60)}:${(rem % 60).toString().padStart(2, "0")}`);
-          drawFrame(t);
-          if (t < duration && !audio.ended) {
-            requestAnimationFrame(animate);
-          } else {
-            stopRecording();
-          }
-        };
-        animate();
-
-        // 備用：監聽音訊結束事件
-        audio.onended = () => stopRecording();
-      });
+      // 4. 下載/分享 MP4
+      setStatusText("下載中...");
+      const mp4Blob = await res.blob();
+      await downloadOrShare(mp4Blob, `${title}.mp4`);
+      setStatusText("");
     } catch (err) {
-      console.error("[VideoExporter]", err);
-      alert("影片匯出失敗：" + (err instanceof Error ? err.message : "未知錯誤"));
+      console.error("[匯出MP4]", err);
+      const msg = err instanceof Error ? err.message : "未知錯誤";
+      alert(`MP4 匯出失敗：${msg}\n\n可先下載 MP3 + 背景圖，用剪映合成`);
+      setStatusText("");
+    } finally {
       setExporting(false);
-      setTimeInfo("");
     }
-  }, [imageUrl, audioUrl, lyrics, title]);
-
-  const stopAndDownload = () => {
-    stopRef.current = true;
-  };
+  }, [materialsReady, audioDuration, lyrics, title]);
 
   return (
     <div className="space-y-4">
-      {/* MP3 下載 - 所有裝置都能用 */}
+      {/* MP3 + 背景圖下載 */}
       <div className="flex flex-wrap gap-3">
         <button
           onClick={downloadAudio}
@@ -486,60 +250,26 @@ export default function VideoExporter({
         </button>
       </div>
 
-      {/* MP4 影片 - 支援的瀏覽器才顯示 */}
-      {supportsVideo && (
-        <>
-          {exporting ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={stopAndDownload}
-                  className="btn-primary bg-orange-600 hover:bg-orange-500 py-3 px-5 whitespace-nowrap"
-                >
-                  <Download className="w-4 h-4" />
-                  停止並下載
-                </button>
-                <div className="flex items-center gap-3 flex-1">
-                  <Loader2 className="w-5 h-5 text-primary-400 animate-spin" />
-                  <div className="flex-1">
-                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary-500 transition-all duration-300 rounded-full"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-sm text-gray-400 tabular-nums whitespace-nowrap">
-                    {progress}% {timeInfo}
-                  </span>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">錄製中...隨時可按「停止並下載」，錄到哪就下載到哪</p>
-            </div>
-          ) : (
-            <button onClick={exportVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
-              <Film className="w-5 h-5" />
-              下載 MP4 影片（含歌詞字幕）
-            </button>
-          )}
-        </>
+      {/* 匯出 MP4 影片 - 所有裝置統一走後端 */}
+      {exporting ? (
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-5 h-5 text-green-400 animate-spin" />
+          <span className="text-sm text-gray-300">{statusText}</span>
+        </div>
+      ) : (
+        <button
+          onClick={exportMP4}
+          disabled={!materialsReady}
+          className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500 disabled:opacity-50"
+        >
+          <Film className="w-5 h-5" />
+          {materialsReady ? "匯出 MP4 影片（含歌詞字幕）" : "素材準備中..."}
+        </button>
       )}
 
-      {!supportsVideo && (
-        <div>
-          {creatingVideo ? (
-            <div className="flex items-center gap-3">
-              <Loader2 className="w-5 h-5 text-green-400 animate-spin" />
-              <span className="text-sm text-gray-300">{timeInfo || "合成影片中..."}</span>
-            </div>
-          ) : (
-            <button onClick={createClientVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
-              <Film className="w-5 h-5" />
-              合成 MP4 影片（可分享 FB）
-            </button>
-          )}
-        </div>
-      )}
+      <p className="text-xs text-gray-500">
+        MP4 由伺服器合成，iPhone / Android / 電腦都能直接播放分享
+      </p>
     </div>
   );
 }
