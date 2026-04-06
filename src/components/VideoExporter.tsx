@@ -67,8 +67,9 @@ export default function VideoExporter({
 }: VideoExporterProps) {
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [timeInfo, setTimeInfo] = useState("");
   const [downloadingMp3, setDownloadingMp3] = useState(false);
-  const cancelRef = useRef(false);
+  const stopRef = useRef(false);
   const [supportsVideo, setSupportsVideo] = useState(true);
 
   useEffect(() => {
@@ -124,7 +125,7 @@ export default function VideoExporter({
   const exportVideo = useCallback(async () => {
     setExporting(true);
     setProgress(0);
-    cancelRef.current = false;
+    stopRef.current = false;
 
     try {
       const canvas = document.createElement("canvas");
@@ -270,13 +271,18 @@ export default function VideoExporter({
         audio.play();
 
         const animate = () => {
-          if (cancelRef.current) {
+          if (stopRef.current) {
             audio.pause();
-            recorder.stop();
+            drawFrame(audio.currentTime);
+            setTimeout(() => recorder.stop(), 100);
             return;
           }
           const t = audio.currentTime;
+          const remaining = Math.max(0, Math.ceil(duration - t));
+          const rm = Math.floor(remaining / 60);
+          const rs = remaining % 60;
           setProgress(Math.round((t / duration) * 100));
+          setTimeInfo(`剩餘 ${rm}:${rs.toString().padStart(2, "0")}`);
           drawFrame(t);
           if (t < duration && !audio.ended) {
             requestAnimationFrame(animate);
@@ -295,8 +301,8 @@ export default function VideoExporter({
     }
   }, [imageUrl, audioUrl, lyrics, title]);
 
-  const cancelExport = () => {
-    cancelRef.current = true;
+  const stopAndDownload = () => {
+    stopRef.current = true;
   };
 
   return (
@@ -325,28 +331,31 @@ export default function VideoExporter({
       {supportsVideo && (
         <>
           {exporting ? (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={cancelExport}
-                className="btn-primary bg-red-600 hover:bg-red-500 py-3 px-5"
-              >
-                <Square className="w-4 h-4" />
-                取消
-              </button>
-              <div className="flex items-center gap-3 flex-1">
-                <Loader2 className="w-5 h-5 text-primary-400 animate-spin" />
-                <div className="flex-1">
-                  <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary-500 transition-all duration-300 rounded-full"
-                      style={{ width: `${progress}%` }}
-                    />
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={stopAndDownload}
+                  className="btn-primary bg-orange-600 hover:bg-orange-500 py-3 px-5 whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4" />
+                  停止並下載
+                </button>
+                <div className="flex items-center gap-3 flex-1">
+                  <Loader2 className="w-5 h-5 text-primary-400 animate-spin" />
+                  <div className="flex-1">
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary-500 transition-all duration-300 rounded-full"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
                   </div>
+                  <span className="text-sm text-gray-400 tabular-nums whitespace-nowrap">
+                    {progress}% {timeInfo}
+                  </span>
                 </div>
-                <span className="text-sm text-gray-400 tabular-nums w-12 text-right">
-                  {progress}%
-                </span>
               </div>
+              <p className="text-xs text-gray-500">錄製中...隨時可按「停止並下載」，錄到哪就下載到哪</p>
             </div>
           ) : (
             <button onClick={exportVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
