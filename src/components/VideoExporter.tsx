@@ -219,10 +219,10 @@ export default function VideoExporter({
       // 3. 設定錄製
       const lyricLines = parseLyrics(lyrics, duration);
       const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
+      canvas.width = 960;
+      canvas.height = 540;
       const ctx = canvas.getContext("2d")!;
-      const canvasStream = canvas.captureStream(30);
+      const canvasStream = canvas.captureStream(10);
       const SWITCH_SEC = 10;
       const FADE_SEC = 2;
 
@@ -253,7 +253,7 @@ export default function VideoExporter({
       }
       if (!mimeType) throw new Error("瀏覽器不支援影片錄製");
 
-      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
+      const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 500000 });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
