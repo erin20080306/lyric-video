@@ -6,7 +6,7 @@ import { parseLyrics } from "@/lib/lyrics-parser";
 
 // ===== 後端 FFmpeg 伺服器 URL =====
 const VIDEO_SERVER =
-  process.env.NEXT_PUBLIC_VIDEO_SERVER_URL || "https://lyric-video-server.onrender.com";
+  process.env.NEXT_PUBLIC_VIDEO_SERVER_URL || "https://eron2008-lyric-video-server.hf.space";
 
 interface VideoExporterProps {
   imageUrl: string;
