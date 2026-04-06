@@ -14,6 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import LyricVideoPlayer from "@/components/LyricVideoPlayer";
+import VideoExporter from "@/components/VideoExporter";
 import type {
   GenerationResult,
   GenerationStep,
@@ -327,6 +328,19 @@ export default function Home() {
               lyrics={result.lyrics}
               title={result.title}
             />
+
+            {/* 下載影片 */}
+            <div className="glass-card p-5">
+              <VideoExporter
+                imageUrl={result.imageUrl}
+                audioUrl={result.audioUrl}
+                lyrics={result.lyrics}
+                title={result.title}
+              />
+              <p className="text-xs text-gray-500 mt-3">
+                錄製完整歌曲為影片檔，可直接上傳 Facebook、Instagram、YouTube
+              </p>
+            </div>
 
             {/* 歌詞全文 */}
             <div className="glass-card overflow-hidden">
