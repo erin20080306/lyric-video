@@ -119,10 +119,23 @@ export async function POST(request: NextRequest) {
     // === 如果有設定 Suno API，使用真實 AI 生成歌聲 ===
     if (isSunoConfigured()) {
       try {
+        const vocalStyles = [
+          "pop, mandarin, female vocal, emotional, catchy melody",
+          "pop, mandarin, male vocal, warm, catchy melody",
+          "ballad, mandarin, female vocal, gentle, heartfelt",
+          "ballad, mandarin, male vocal, deep, soulful",
+          "rock, mandarin, male vocal, energetic, powerful",
+          "folk, mandarin, female vocal, soft, acoustic",
+          "R&B, mandarin, female vocal, smooth, groovy",
+          "indie, mandarin, male vocal, dreamy, atmospheric",
+        ];
+        const style = vocalStyles[Math.floor(Math.random() * vocalStyles.length)];
+        console.log("[Music] 選擇風格:", style);
+
         const audioUrl = await generateSong({
           lyrics: lyrics || `一首關於${theme}的歌`,
           title: `${theme}之歌`,
-          style: "pop, mandarin, female vocal, emotional, catchy melody",
+          style,
         });
         return NextResponse.json({ audioUrl, source: "suno" });
       } catch (sunoErr) {
