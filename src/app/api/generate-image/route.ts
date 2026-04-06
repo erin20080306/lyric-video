@@ -67,37 +67,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const baseSeed = Math.floor(Math.random() * 999999);
+    const seed = Math.floor(Math.random() * 999999);
+    const style = IMAGE_STYLES[Math.floor(Math.random() * IMAGE_STYLES.length)];
 
-    // 隨機選 3 種不同風格
-    const shuffled = [...IMAGE_STYLES].sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, 3);
+    console.log("[Image] 生成 1 張 AI 圖片...");
 
-    console.log("[Image] 並行生成 3 張 AI 圖片...");
-
-    const promises = selected.map((style, i) =>
-      fetchImage(`${style}, ${theme}, no text, no words, no letters, 4k`, baseSeed + i * 1000)
+    const imageUrl = await fetchImage(
+      `${style}, ${theme}, no text, no words, no letters, 4k`,
+      seed
     );
 
-    const results = await Promise.all(promises);
-    const imageUrls = results.filter((url): url is string => url !== null);
+    if (imageUrl) {
+      console.log("[Image] AI 圖片生成完成");
+      return NextResponse.json({ imageUrl, seed, theme });
+    }
 
-    console.log(`[Image] 成功 ${imageUrls.length}/3 張`);
-
-    // 不足 3 張用 SVG fallback 補齊
+    // Fallback
     const fallbackColors = [
       ["#667eea", "#764ba2"],
       ["#f093fb", "#f5576c"],
       ["#4facfe", "#00f2fe"],
     ];
-    while (imageUrls.length < 3) {
-      const [c1, c2] = fallbackColors[imageUrls.length % fallbackColors.length];
-      imageUrls.push(makeSvgFallback(theme, c1, c2));
-    }
-
+    const [c1, c2] = fallbackColors[Math.floor(Math.random() * fallbackColors.length)];
     return NextResponse.json({
-      imageUrl: imageUrls[0],
-      imageUrls,
+      imageUrl: makeSvgFallback(theme, c1, c2),
+      seed,
+      theme,
     });
   } catch (error) {
     return NextResponse.json(

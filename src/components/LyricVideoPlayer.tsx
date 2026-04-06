@@ -40,17 +40,46 @@ export default function LyricVideoPlayer({
   const [showControls, setShowControls] = useState(true);
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [allImages, setAllImages] = useState<string[]>([]);
 
-  const images = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
+  // 初始化圖片：先用第一張，然後背景加載更多
+  useEffect(() => {
+    const initial = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
+    setAllImages(initial);
+
+    // 背景加載額外 2 張圖片
+    if (initial.length <= 1) {
+      const styles = [
+        "abstract watercolor painting, soft gradients, ethereal mood",
+        "digital fantasy landscape, epic scenery, magical lighting",
+        "neon cyberpunk cityscape, glowing lights, futuristic",
+        "impressionist oil painting, warm tones, romantic mood",
+      ];
+      const shuffled = styles.sort(() => Math.random() - 0.5).slice(0, 2);
+
+      shuffled.forEach((style, i) => {
+        const seed = Math.floor(Math.random() * 999999);
+        const prompt = encodeURIComponent(`${style}, ${title}, no text, no words, 4k`);
+        const url = `https://image.pollinations.ai/prompt/${prompt}?width=1280&height=720&nologo=true&seed=${seed}`;
+
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          setAllImages((prev) => [...prev, url]);
+        };
+        img.src = url;
+      });
+    }
+  }, [imageUrl, imageUrls, title]);
 
   // 圖片輪播（每 10 秒切換）
   useEffect(() => {
-    if (images.length <= 1 || !isPlaying) return;
+    if (allImages.length <= 1 || !isPlaying) return;
     const interval = setInterval(() => {
-      setCurrentImageIndex((prev) => (prev + 1) % images.length);
+      setCurrentImageIndex((prev) => (prev + 1) % allImages.length);
     }, 10000);
     return () => clearInterval(interval);
-  }, [images.length, isPlaying]);
+  }, [allImages.length, isPlaying]);
 
   // 解析歌詞
   useEffect(() => {
@@ -190,7 +219,7 @@ export default function LyricVideoPlayer({
       >
         {/* 背景圖輪播 */}
         <div className="absolute inset-0">
-          {images.map((src, i) => (
+          {allImages.map((src: string, i: number) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               key={i}
