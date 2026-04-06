@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isSunoConfigured, generateSong } from "@/lib/suno";
 
+// Vercel serverless function timeout（免費版最多 60 秒）
+export const maxDuration = 60;
+
 // 音符頻率表 (Hz)
 const NOTE: Record<string, number> = {
   C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.0, A3: 220.0, B3: 246.94,

@@ -21,18 +21,25 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime });
 }
 
-/** 手機相容的 Blob 下載 */
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-
-  // iOS Safari: window.open 比 <a> download 更可靠
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  if (isIOS) {
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    return;
+/** 手機 + 桌面通用下載/分享 */
+async function downloadOrShare(blob: Blob, filename: string) {
+  // 手機優先用 Web Share API（可直接分享到 FB/IG/LINE）
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({
+        title: filename,
+        files: [file],
+      });
+      return;
+    } catch (e) {
+      // 使用者取消分享，fallback 到下載
+      if ((e as Error).name === "AbortError") return;
+    }
   }
 
+  // fallback: <a download>
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -69,12 +76,42 @@ export default function VideoExporter({
   const [progress, setProgress] = useState(0);
   const [timeInfo, setTimeInfo] = useState("");
   const [downloadingMp3, setDownloadingMp3] = useState(false);
+  const [creatingVideo, setCreatingVideo] = useState(false);
   const stopRef = useRef(false);
   const [supportsVideo, setSupportsVideo] = useState(true);
 
   useEffect(() => {
     setSupportsVideo(canRecordVideo());
   }, []);
+
+  // ===== 伺服器端合成 MP4（iPhone 等不支援 MediaRecorder 的裝置）=====
+  const createServerVideo = useCallback(async () => {
+    setCreatingVideo(true);
+    try {
+      const res = await fetch("/api/export-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: imageUrl,
+          audioBase64: audioUrl,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "影片合成失敗");
+      }
+
+      const data = await res.json();
+      const blob = dataUrlToBlob(data.videoUrl);
+      await downloadOrShare(blob, `${title}.mp4`);
+    } catch (err) {
+      console.error("[伺服器MP4]", err);
+      alert("影片合成失敗：" + (err instanceof Error ? err.message : "未知錯誤"));
+    } finally {
+      setCreatingVideo(false);
+    }
+  }, [imageUrl, audioUrl, title]);
 
   // ===== MP3 下載（手機 + 桌面都能用）=====
   const downloadAudio = useCallback(async () => {
@@ -91,7 +128,7 @@ export default function VideoExporter({
       if (!blob.type.includes("audio")) {
         blob = new Blob([blob], { type: "audio/mpeg" });
       }
-      downloadBlob(blob, `${title}.mp3`);
+      downloadOrShare(blob, `${title}.mp3`);
     } catch (err) {
       console.error("[下載MP3]", err);
       alert("MP3 下載失敗，請長按播放器試試");
@@ -114,7 +151,7 @@ export default function VideoExporter({
         a.click();
         return;
       }
-      downloadBlob(blob, `${title}-背景圖.jpg`);
+      downloadOrShare(blob, `${title}-背景圖.jpg`);
     } catch (err) {
       console.error("[下載圖片]", err);
       alert("圖片下載失敗");
@@ -300,7 +337,7 @@ export default function VideoExporter({
           const ext = mimeType.includes("mp4") ? "mp4" : "webm";
           const blob = new Blob(chunks, { type: mimeType });
           if (blob.size > 0) {
-            downloadBlob(blob, `${title}.${ext}`);
+            downloadOrShare(blob, `${title}.${ext}`);
           }
           setExporting(false);
           setProgress(100);
@@ -417,9 +454,19 @@ export default function VideoExporter({
       )}
 
       {!supportsVideo && (
-        <p className="text-xs text-gray-500">
-          💡 MP4 影片需在電腦版 Chrome 下載。手機可用 MP3 + 背景圖，搭配剪映/CapCut 合成影片。
-        </p>
+        <div>
+          {creatingVideo ? (
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-5 h-5 text-green-400 animate-spin" />
+              <span className="text-sm text-gray-300">伺服器合成影片中，請稍候（約 30 秒）...</span>
+            </div>
+          ) : (
+            <button onClick={createServerVideo} className="btn-primary py-3 px-5 bg-green-600 hover:bg-green-500">
+              <Film className="w-5 h-5" />
+              合成 MP4 影片（可分享 FB）
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
