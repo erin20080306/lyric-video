@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // 只處理頁面路由
+  if (pathname !== "/" && pathname !== "/login") {
+    return NextResponse.next();
+  }
+
   const authToken = request.cookies.get("auth_token")?.value;
   const isLoggedIn = authToken === "authenticated";
 
@@ -11,8 +16,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // 未登入 → 非 /login 頁面導向登入
-  if (pathname !== "/login" && !isLoggedIn) {
+  // 未登入 → 訪問首頁導向登入
+  if (pathname === "/" && !isLoggedIn) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
@@ -20,13 +25,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * 只攔截頁面路由，排除：
-     * - api (API routes)
-     * - _next (Next.js 內部)
-     * - favicon, manifest 等靜態檔案
-     */
-    "/((?!api|_next|favicon|manifest|.*\\.).*)",
-  ],
+  matcher: ["/", "/login"],
 };
