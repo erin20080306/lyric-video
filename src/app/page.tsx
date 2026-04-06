@@ -96,6 +96,7 @@ export default function Home() {
         lyrics: lyricsData.lyrics,
         title: lyricsData.title,
         imageUrl: imageData.imageUrl,
+        imageUrls: imageData.imageUrls || [imageData.imageUrl],
         audioUrl: musicData.audioUrl,
         theme: trimmed,
         createdAt: new Date().toISOString(),
@@ -321,6 +322,7 @@ export default function Home() {
             {/* 歌詞影片播放器 */}
             <LyricVideoPlayer
               imageUrl={result.imageUrl}
+              imageUrls={result.imageUrls || [result.imageUrl]}
               audioUrl={result.audioUrl}
               lyrics={result.lyrics}
               title={result.title}

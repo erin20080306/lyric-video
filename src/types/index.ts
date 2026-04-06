@@ -1,6 +1,7 @@
 export interface GenerationResult {
   lyrics: string;
   imageUrl: string;
+  imageUrls?: string[];
   audioUrl: string;
   title: string;
   theme: string;
@@ -14,6 +15,7 @@ export interface LyricsResponse {
 
 export interface ImageResponse {
   imageUrl: string;
+  imageUrls?: string[];
 }
 
 export interface MusicResponse {

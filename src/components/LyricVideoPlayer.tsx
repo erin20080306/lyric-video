@@ -15,6 +15,7 @@ import type { LyricLine } from "@/lib/lyrics-parser";
 
 interface LyricVideoPlayerProps {
   imageUrl: string;
+  imageUrls?: string[];
   audioUrl: string;
   lyrics: string;
   title: string;
@@ -22,6 +23,7 @@ interface LyricVideoPlayerProps {
 
 export default function LyricVideoPlayer({
   imageUrl,
+  imageUrls,
   audioUrl,
   lyrics,
   title,
@@ -37,6 +39,18 @@ export default function LyricVideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  const images = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
+
+  // 圖片輪播（每 10 秒切換）
+  useEffect(() => {
+    if (images.length <= 1 || !isPlaying) return;
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prev) => (prev + 1) % images.length);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [images.length, isPlaying]);
 
   // 解析歌詞
   useEffect(() => {
@@ -174,14 +188,22 @@ export default function LyricVideoPlayer({
           isFullscreen ? "h-screen" : "aspect-video"
         }`}
       >
-        {/* 背景圖 */}
+        {/* 背景圖輪播 */}
         <div className="absolute inset-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl}
-            alt="背景"
-            className="w-full h-full object-cover"
-          />
+          {images.map((src, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={src}
+              alt="背景"
+              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-[2000ms] ease-in-out"
+              style={{
+                opacity: i === currentImageIndex ? 1 : 0,
+                transform: i === currentImageIndex ? "scale(1.05)" : "scale(1)",
+                transition: "opacity 2s ease-in-out, transform 10s ease-in-out",
+              }}
+            />
+          ))}
           {/* 暗化背景讓字幕更清晰 */}
           <div className="absolute inset-0 bg-black/40" />
           {/* 上方漸層 */}
