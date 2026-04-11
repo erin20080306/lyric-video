@@ -70,8 +70,8 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
   console.log("[Suno API] taskId:", taskId);
 
-  // Step 2: 輪詢任務狀態（最多 90 秒）
-  const maxAttempts = 30; // 90 秒 / 3 秒
+  // Step 2: 輪詢任務狀態（最多 45 秒，避免 Vercel 60 秒限制）
+  const maxAttempts = 15; // 45 秒 / 3 秒
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 3000));
 
