@@ -1,15 +1,21 @@
 /**
- * AI 歌曲生成整合模組（完全免費）
+ * AI 歌曲生成整合模組
  *
  * 優先順序：
- *   1. DiffRhythm2（HF Space，免費開源，有歌聲，需 HF_TOKEN）
- *   2. ACE Music（acemusic.ai，5 秒超時，備援）
+ *   1. Suno API (sunoapi.org) - 付費但穩定，有歌聲
+ *   2. Apiframe AI - 有免費試用，有歌聲
+ *   3. DiffRhythm2（HF Space，免費開源，有歌聲，需 HF_TOKEN）
+ *   4. ACE Music（acemusic.ai，5 秒超時，備援）
  *
  * 環境變數：
+ *   SUNO_API_KEY       - 從 sunoapi.org 獲取（付費服務）
+ *   APIFRAME_API_KEY   - 從 apiframe.ai 獲取（有免費試用）
  *   HF_TOKEN           - 從 huggingface.co/settings/tokens 免費取得
  *   ACE_MUSIC_API_KEY  - 從 acemusic.ai/playground/api-key 免費取得
  */
 
+const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
+const APIFRAME_API_KEY = process.env.APIFRAME_API_KEY || "";
 const ACE_MUSIC_API_KEY = process.env.ACE_MUSIC_API_KEY || "";
 const ACE_BASE_URL = "https://api.acemusic.ai";
 const HF_TOKEN = process.env.HF_TOKEN || "";
@@ -26,7 +32,129 @@ export interface SunoGenerateParams {
  * 檢查是否有任何 AI 音樂 API 可用
  */
 export function isSunoConfigured(): boolean {
-  return !!(HF_TOKEN || ACE_MUSIC_API_KEY);
+  return !!(SUNO_API_KEY || APIFRAME_API_KEY || HF_TOKEN || ACE_MUSIC_API_KEY);
+}
+
+// ===== Suno API (sunoapi.org) =====
+
+async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> {
+  if (!SUNO_API_KEY) throw new Error("SUNO_API_KEY 未設定");
+
+  console.log("[Suno API] 開始生成歌曲:", params.title);
+
+  // 組合 prompt：風格 + 歌詞
+  const prompt = `${params.style}. Title: ${params.title}.\nLyrics:\n${params.lyrics}`;
+
+  // Step 1: 提交生成任務
+  const submitRes = await fetch("https://api.sunoapi.org/api/v1/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUNO_API_KEY}`,
+    },
+    body: JSON.stringify({
+      prompt,
+      customMode: false,
+      instrumental: params.instrumental || false,
+      model: "V4_5ALL",
+    }),
+  });
+
+  if (!submitRes.ok) {
+    const errText = await submitRes.text();
+    console.error("[Suno API] 提交失敗:", errText);
+    throw new Error(`Suno API 提交失敗: ${submitRes.status}`);
+  }
+
+  const submitData = await submitRes.json();
+  const taskId = submitData?.data?.taskId;
+  if (!taskId) throw new Error("Suno API 未返回 taskId");
+
+  console.log("[Suno API] taskId:", taskId);
+
+  // Step 2: 輪詢任務狀態（最多 120 秒）
+  const maxAttempts = 24; // 120 秒 / 5 秒
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+
+    const statusRes = await fetch(
+      `https://api.sunoapi.org/api/v1/generate/record-info?taskId=${taskId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${SUNO_API_KEY}`,
+        },
+      }
+    );
+
+    if (!statusRes.ok) {
+      console.error("[Suno API] 狀態查詢失敗:", statusRes.status);
+      continue;
+    }
+
+    const statusData = await statusRes.json();
+    const status = statusData?.data?.status;
+
+    console.log(`[Suno API] 狀態 (${i + 1}/${maxAttempts}):`, status);
+
+    if (status === "SUCCESS") {
+      const audioUrl = statusData?.data?.response?.data?.[0]?.audio_url;
+      if (audioUrl) {
+        console.log("[Suno API] 生成完成:", audioUrl.slice(0, 80));
+        return audioUrl;
+      }
+      throw new Error("Suno API 成功但未返回音訊 URL");
+    }
+
+    if (status === "FAILED") {
+      throw new Error("Suno API 生成失敗");
+    }
+  }
+
+  throw new Error("Suno API 生成超時");
+}
+
+// ===== Apiframe AI =====
+
+async function generateWithApiframe(params: SunoGenerateParams): Promise<string> {
+  if (!APIFRAME_API_KEY) throw new Error("APIFRAME_API_KEY 未設定");
+
+  console.log("[Apiframe AI] 開始生成歌曲:", params.title);
+
+  // 組合 prompt：風格 + 歌詞
+  const prompt = `${params.style}. Title: ${params.title}.\nLyrics:\n${params.lyrics}`;
+
+  // 提交生成任務（同步模式，等待結果）
+  const res = await fetch("https://api.apiframe.pro/suno-imagine", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: APIFRAME_API_KEY,
+    },
+    body: JSON.stringify({
+      prompt,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("[Apiframe AI] 請求失敗:", errText);
+    throw new Error(`Apiframe AI 失敗: ${res.status}`);
+  }
+
+  const data = await res.json();
+  console.log("[Apiframe AI] 回應:", JSON.stringify(data).slice(0, 300));
+
+  // Apiframe 回應格式可能有變，根據實際文檔調整
+  // 假設回傳格式包含 audio_url 或類似欄位
+  const audioUrl = data?.audio_url || data?.output?.audio_url || data?.data?.[0]?.audio_url;
+
+  if (!audioUrl) {
+    console.error("[Apiframe AI] 回應格式:", data);
+    throw new Error("Apiframe AI 未返回音訊 URL");
+  }
+
+  console.log("[Apiframe AI] 生成完成:", audioUrl.slice(0, 80));
+  return audioUrl;
 }
 
 // ===== ACE Music =====
@@ -169,10 +297,28 @@ async function generateWithDiffRhythm2(params: SunoGenerateParams): Promise<stri
   throw new Error("DiffRhythm2 多次嘗試均失敗（GPU 可能暫時不可用）");
 }
 
-// ===== 主入口：DiffRhythm2 → ACE Music =====
+// ===== 主入口：Suno API → Apiframe AI → DiffRhythm2 → ACE Music =====
 
 export async function generateSong(params: SunoGenerateParams): Promise<string> {
-  // 1. 優先 DiffRhythm2（免費、有歌聲）
+  // 1. 優先 Suno API（付費但穩定，有歌聲）
+  if (SUNO_API_KEY) {
+    try {
+      return await generateWithSunoAPI(params);
+    } catch (err) {
+      console.warn("[generateSong] Suno API 失敗:", (err as Error).message);
+    }
+  }
+
+  // 2. 備援 Apiframe AI（有免費試用，有歌聲）
+  if (APIFRAME_API_KEY) {
+    try {
+      return await generateWithApiframe(params);
+    } catch (err) {
+      console.warn("[generateSong] Apiframe AI 失敗:", (err as Error).message);
+    }
+  }
+
+  // 3. 備援 DiffRhythm2（免費、有歌聲）
   if (HF_TOKEN) {
     try {
       return await generateWithDiffRhythm2(params);
@@ -181,7 +327,7 @@ export async function generateSong(params: SunoGenerateParams): Promise<string> 
     }
   }
 
-  // 2. 備援 ACE Music（5 秒超時）
+  // 4. 備援 ACE Music（5 秒超時）
   if (ACE_MUSIC_API_KEY) {
     try {
       return await generateWithACE(params);
