@@ -54,6 +54,7 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
       customMode: false,
       instrumental: params.instrumental || false,
       model: "V4_5ALL",
+      callBackUrl: "https://example.com/callback", // 必須提供非空 URL
     }),
   });
 
@@ -93,12 +94,19 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
     console.log(`[Suno API] 狀態 (${i + 1}/${maxAttempts}):`, status);
 
-    if (status === "SUCCESS") {
-      const audioUrl = statusData?.data?.response?.data?.[0]?.audio_url;
+    if (status === "SUCCESS" || status === "TEXT_SUCCESS") {
+      // 嘗試多種可能的音訊 URL 欄位
+      const audioUrl =
+        statusData?.data?.response?.sunoData?.[0]?.streamAudioUrl ||
+        statusData?.data?.response?.sunoData?.[0]?.audioUrl ||
+        statusData?.data?.response?.data?.[0]?.audio_url ||
+        statusData?.data?.response?.data?.[0]?.streamAudioUrl;
+
       if (audioUrl) {
         console.log("[Suno API] 生成完成:", audioUrl.slice(0, 80));
         return audioUrl;
       }
+      console.error("[Suno API] 回應格式:", JSON.stringify(statusData?.data?.response, null, 2));
       throw new Error("Suno API 成功但未返回音訊 URL");
     }
 
