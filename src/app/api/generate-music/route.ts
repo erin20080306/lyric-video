@@ -150,8 +150,8 @@ export async function POST(request: NextRequest) {
     // === Fallback: Mock 純音樂（無歌聲）===
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    const sampleRate = 44100;
-    const duration = 30; // 30 秒
+    const sampleRate = 22050;
+    const duration = 150; // 150 秒（2.5 分鐘）
     const numSamples = sampleRate * duration;
     const numChannels = 1;
     const bitsPerSample = 16;
