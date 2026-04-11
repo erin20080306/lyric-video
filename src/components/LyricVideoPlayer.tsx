@@ -13,6 +13,38 @@ import {
 import { parseLyrics, getVisibleLines, formatTime } from "@/lib/lyrics-parser";
 import type { LyricLine } from "@/lib/lyrics-parser";
 
+function makeSvgFallback(theme: string, c1: string, c2: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:${c1};stop-opacity:1" />
+      <stop offset="100%" style="stop-color:${c2};stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="glow1" cx="30%" cy="30%" r="40%">
+      <stop offset="0%" style="stop-color:white;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:white;stop-opacity:0" />
+    </radialGradient>
+    <radialGradient id="glow2" cx="70%" cy="70%" r="50%">
+      <stop offset="0%" style="stop-color:white;stop-opacity:0.15" />
+      <stop offset="100%" style="stop-color:white;stop-opacity:0" />
+    </radialGradient>
+    <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="white" opacity="0.1" />
+    </pattern>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)" />
+  <rect width="1280" height="720" fill="url(#dots)" />
+  <ellipse cx="384" cy="216" rx="400" ry="250" fill="url(#glow1)" />
+  <ellipse cx="896" cy="504" rx="500" ry="300" fill="url(#glow2)" />
+  <circle cx="200" cy="150" r="80" fill="white" opacity="0.05" />
+  <circle cx="1080" cy="570" r="120" fill="white" opacity="0.05" />
+  <circle cx="640" cy="360" r="200" fill="none" stroke="white" opacity="0.08" stroke-width="2" />
+  <text x="640" y="340" text-anchor="middle" font-family="sans-serif" font-size="48" font-weight="bold" fill="white" opacity="0.9">${theme}</text>
+  <text x="640" y="390" text-anchor="middle" font-family="sans-serif" font-size="18" fill="white" opacity="0.6">AI Generated Background</text>
+</svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
+
 interface LyricVideoPlayerProps {
   imageUrl: string;
   imageUrls?: string[];
@@ -44,10 +76,13 @@ export default function LyricVideoPlayer({
 
   // 初始化圖片
   useEffect(() => {
-    const initial = imageUrls && imageUrls.length > 1 ? imageUrls : [imageUrl];
+    // 如果沒有圖片，使用默認 fallback
+    const defaultFallback = makeSvgFallback(title || "Music", "#667eea", "#764ba2");
+    const initial = imageUrls && imageUrls.length > 1 ? imageUrls : (imageUrl ? [imageUrl] : [defaultFallback]);
     setAllImages(initial);
     setCurrentImageIndex(0);
-  }, [imageUrl, imageUrls]);
+    console.log('[LyricVideoPlayer] 初始化圖片:', initial.length, '張');
+  }, [imageUrl, imageUrls, title]);
 
   // 播放後才背景載入額外圖片（不拖慢初始載入）
   const extraLoaded = useRef(false);
