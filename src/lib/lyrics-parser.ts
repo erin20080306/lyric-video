@@ -8,7 +8,7 @@ export interface LyricLine {
 
 /**
  * 將純文字歌詞解析成帶時間軸的字幕行
- * 每行自動分配時間，模擬歌詞同步效果
+ * 支援 LRC 格式（[00:00.00] 時間戳），如果沒有時間戳則自動分配
  */
 export function parseLyrics(
   lyrics: string,
@@ -17,7 +17,58 @@ export function parseLyrics(
   const rawLines = lyrics.split("\n");
   const lines: LyricLine[] = [];
 
-  // 先分類每一行
+  // 檢查是否為 LRC 格式（包含時間戳）
+  const hasLrcTimestamp = rawLines.some(line => /^\[\d{2}:\d{2}\.\d{2}\]/.test(line));
+
+  if (hasLrcTimestamp) {
+    // 解析 LRC 格式
+    let id = 0;
+    for (const raw of rawLines) {
+      const trimmed = raw.trim();
+      if (!trimmed) continue;
+
+      // 解析時間戳 [00:00.00]
+      const timeMatch = trimmed.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
+      if (timeMatch) {
+        const minutes = parseInt(timeMatch[1], 10);
+        const seconds = parseInt(timeMatch[2], 10);
+        const centiseconds = parseInt(timeMatch[3], 10);
+        const startTime = minutes * 60 + seconds + centiseconds / 100;
+        const text = timeMatch[4].trim();
+
+        // 判斷類型
+        let type: LyricLine["type"] = "lyric";
+        if (text.startsWith("【") || text.startsWith("作詞") || text.startsWith("作曲")) {
+          type = "title";
+        } else if (text.startsWith("[") && text.endsWith("]")) {
+          type = "section";
+        } else if (!text) {
+          type = "empty";
+        }
+
+        lines.push({
+          id: id++,
+          text,
+          startTime,
+          endTime: startTime + 3, // 預設每行 3 秒，後續會調整
+          type,
+        });
+      }
+    }
+
+    // 調整 endTime（基於下一行的 startTime）
+    for (let i = 0; i < lines.length - 1; i++) {
+      lines[i].endTime = lines[i + 1].startTime;
+    }
+    // 最後一行延長到總長度
+    if (lines.length > 0) {
+      lines[lines.length - 1].endTime = Math.max(totalDuration, lines[lines.length - 1].startTime + 3);
+    }
+
+    return lines;
+  }
+
+  // 沒有時間戳，使用自動分配邏輯
   const parsed: Array<{ text: string; type: LyricLine["type"] }> = [];
   for (const raw of rawLines) {
     const trimmed = raw.trim();
