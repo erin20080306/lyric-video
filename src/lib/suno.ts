@@ -39,15 +39,8 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
   console.log("[Suno API] 開始生成歌曲:", params.title);
 
-  // 將 LRC 格式歌詞轉換為純文字（移除時間戳）
-  const plainLyrics = params.lyrics
-    .split('\n')
-    .map(line => line.replace(/^\[\d{2}:\d{2}\.\d{2}\]/, '').trim())
-    .filter(line => line.length > 0)
-    .join('\n');
-
-  // 組合 prompt：風格 + 歌詞（要求 2-3 分鐘的完整歌曲，明確要求歌聲）
-  const prompt = `${params.style}. Title: ${params.title}. Full song structure: intro, verse 1, chorus, verse 2, chorus, bridge, final chorus, outro. Target duration: 2-3 minutes. Must include vocals with singing. No instrumental only.\nLyrics:\n${plainLyrics}`;
+  // 不傳遞歌詞，讓 Suno API 自動生成，確保有歌聲
+  const prompt = `${params.style}. Title: ${params.title}. Full song with vocals singing. Must include human voice. Target duration: 2-3 minutes.`;
 
   // Step 1: 提交生成任務
   const submitRes = await fetch("https://api.sunoapi.org/api/v1/generate", {
