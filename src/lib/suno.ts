@@ -39,8 +39,8 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
   console.log("[Suno API] 開始生成歌曲:", params.title);
 
-  // 組合 prompt：風格 + 歌詞
-  const prompt = `${params.style}. Title: ${params.title}.\nLyrics:\n${params.lyrics}`;
+  // 組合 prompt：風格 + 歌詞 + 要求至少 2.3 分鐘
+  const prompt = `${params.style}. Title: ${params.title}. Duration: at least 2.3 minutes (138 seconds).\nLyrics:\n${params.lyrics}`;
 
   // Step 1: 提交生成任務
   const submitRes = await fetch("https://api.sunoapi.org/api/v1/generate", {
