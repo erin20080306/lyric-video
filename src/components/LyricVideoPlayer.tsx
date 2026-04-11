@@ -9,6 +9,7 @@ import {
   Volume2,
   VolumeX,
   SkipBack,
+  Loader2,
 } from "lucide-react";
 import { parseLyrics, getVisibleLines, formatTime } from "@/lib/lyrics-parser";
 import type { LyricLine } from "@/lib/lyrics-parser";
@@ -63,6 +64,7 @@ export default function LyricVideoPlayer({
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
+  const isBufferingRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -73,6 +75,7 @@ export default function LyricVideoPlayer({
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [allImages, setAllImages] = useState<string[]>([]);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   // 初始化圖片
   useEffect(() => {
@@ -125,6 +128,22 @@ export default function LyricVideoPlayer({
   const updateTime = useCallback(() => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
+
+      // 檢查緩衝狀態
+      if (audioRef.current.readyState < 3) {
+        // readyState < 3 表示還沒有足夠的數據播放
+        if (isPlaying && !isBufferingRef.current) {
+          isBufferingRef.current = true;
+          setIsBuffering(true);
+          audioRef.current.pause();
+        }
+      } else {
+        if (isBufferingRef.current) {
+          isBufferingRef.current = false;
+          setIsBuffering(false);
+          audioRef.current.play();
+        }
+      }
     }
     if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(updateTime);
@@ -233,6 +252,7 @@ export default function LyricVideoPlayer({
       <audio
         ref={audioRef}
         src={audioUrl}
+        crossOrigin="anonymous"
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
@@ -240,6 +260,7 @@ export default function LyricVideoPlayer({
           setIsPlaying(false);
           setCurrentTime(0);
         }}
+        onError={(e) => console.error('[Audio Error]', e)}
         preload="auto"
       />
 
@@ -348,10 +369,19 @@ export default function LyricVideoPlayer({
         </div>
 
         {/* 播放/暫停大按鈕 (中央) */}
-        {!isPlaying && (
+        {!isPlaying && !isBuffering && (
           <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30 shadow-2xl">
               <Play className="w-8 h-8 sm:w-10 sm:h-10 text-white ml-1" />
+            </div>
+          </div>
+        )}
+
+        {/* 緩衝指示器 */}
+        {isBuffering && (
+          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center border border-white/30 shadow-2xl">
+              <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 text-white animate-spin" />
             </div>
           </div>
         )}
