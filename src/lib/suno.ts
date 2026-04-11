@@ -2,21 +2,21 @@
  * AI 歌曲生成整合模組
  *
  * 優先順序：
- *   1. ACE Music（acemusic.ai）
- *   2. DiffRhythm2（HF Space，免費開源，需 HF_TOKEN）
- *   3. Suno API (sunoapi.org)
+ *   1. Suno API (sunoapi.org)
+ *   2. ACE Music（acemusic.ai）
+ *   3. DiffRhythm2（HF Space，免費開源，需 HF_TOKEN）
  *
  * 環境變數：
+ *   SUNO_API_KEY       - 從 sunoapi.org 獲取（付費服務）
  *   ACE_MUSIC_API_KEY  - 從 acemusic.ai/playground/api-key 免費取得
  *   HF_TOKEN           - 從 huggingface.co/settings/tokens 免費取得
- *   SUNO_API_KEY       - 從 sunoapi.org 獲取（付費服務）
  */
 
+const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
 const ACE_MUSIC_API_KEY = process.env.ACE_MUSIC_API_KEY || "";
 const ACE_BASE_URL = "https://api.acemusic.ai";
 const HF_TOKEN = process.env.HF_TOKEN || "";
 const DIFFRHYTHM2_URL = "https://aslp-lab-diffrhythm2.hf.space";
-const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
 
 export interface SunoGenerateParams {
   lyrics: string;
@@ -258,10 +258,19 @@ async function generateWithDiffRhythm2(params: SunoGenerateParams): Promise<stri
   throw new Error("DiffRhythm2 多次嘗試均失敗（GPU 可能暫時不可用）");
 }
 
-// ===== 主入口：ACE Music → DiffRhythm2 → Suno API =====
+// ===== 主入口：Suno API → ACE Music → DiffRhythm2 =====
 
 export async function generateSong(params: SunoGenerateParams): Promise<string> {
-  // 1. 優先 ACE Music
+  // 1. 優先 Suno API（付費但穩定）
+  if (SUNO_API_KEY) {
+    try {
+      return await generateWithSunoAPI(params);
+    } catch (err) {
+      console.warn("[generateSong] Suno API 失敗:", (err as Error).message);
+    }
+  }
+
+  // 2. 備援 ACE Music
   if (ACE_MUSIC_API_KEY) {
     try {
       return await generateWithACE(params);
@@ -270,21 +279,12 @@ export async function generateSong(params: SunoGenerateParams): Promise<string> 
     }
   }
 
-  // 2. 備援 DiffRhythm2（免費、有歌聲）
+  // 3. 備援 DiffRhythm2（免費、有歌聲）
   if (HF_TOKEN) {
     try {
       return await generateWithDiffRhythm2(params);
     } catch (err) {
       console.warn("[generateSong] DiffRhythm2 失敗:", (err as Error).message);
-    }
-  }
-
-  // 3. 備援 Suno API（付費但穩定）
-  if (SUNO_API_KEY) {
-    try {
-      return await generateWithSunoAPI(params);
-    } catch (err) {
-      console.warn("[generateSong] Suno API 失敗:", (err as Error).message);
     }
   }
 
