@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 模擬 AI 生成延遲
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Mock 歌詞生成（LRC 格式，帶時間戳）
     const title = `${theme}之歌`;

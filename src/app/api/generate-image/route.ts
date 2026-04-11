@@ -14,7 +14,7 @@ async function fetchImage(prompt: string, seed: number): Promise<string | null> 
 
   for (let retry = 0; retry < 3; retry++) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
       if (res.ok) {
         const buffer = await res.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");

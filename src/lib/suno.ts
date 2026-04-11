@@ -70,10 +70,10 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
   console.log("[Suno API] taskId:", taskId);
 
-  // Step 2: 輪詢任務狀態（最多 120 秒）
-  const maxAttempts = 24; // 120 秒 / 5 秒
+  // Step 2: 輪詢任務狀態（最多 90 秒）
+  const maxAttempts = 30; // 90 秒 / 3 秒
   for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 3000));
 
     const statusRes = await fetch(
       `https://api.sunoapi.org/api/v1/generate/record-info?taskId=${taskId}`,
@@ -130,7 +130,7 @@ async function generateWithACE(params: SunoGenerateParams): Promise<string> {
     : `Style: ${params.style}. Title: ${params.title}.\nLyrics:\n${params.lyrics}`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  const timer = setTimeout(() => controller.abort(), 3000);
 
   let res: Response;
   try {
