@@ -51,8 +51,8 @@ export function parseLyrics(
 
   if (totalEffective === 0) return [];
 
-  // 每行佔用的基本時間
-  const timePerLine = totalDuration / totalEffective;
+  // 每行佔用的基本時間（限制最大 5 秒，避免字幕不動）
+  const timePerLine = Math.min(totalDuration / totalEffective, 5);
 
   console.log('[parseLyrics] timePerLine:', timePerLine);
 
