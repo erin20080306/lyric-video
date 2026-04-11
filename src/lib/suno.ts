@@ -39,8 +39,8 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
 
   console.log("[Suno API] 開始生成歌曲:", params.title);
 
-  // 組合 prompt：風格 + 歌詞（要求 2-3 分鐘的完整歌曲）
-  const prompt = `${params.style}. Title: ${params.title}. Full song structure: intro, verse 1, chorus, verse 2, chorus, bridge, final chorus, outro. Target duration: 2-3 minutes.\nLyrics:\n${params.lyrics}`;
+  // 組合 prompt：風格 + 歌詞（要求 2-3 分鐘的完整歌曲，明確要求歌聲）
+  const prompt = `${params.style}. Title: ${params.title}. Full song structure: intro, verse 1, chorus, verse 2, chorus, bridge, final chorus, outro. Target duration: 2-3 minutes. Must include vocals with singing. No instrumental only.\nLyrics:\n${params.lyrics}`;
 
   // Step 1: 提交生成任務
   const submitRes = await fetch("https://api.sunoapi.org/api/v1/generate", {
@@ -52,7 +52,7 @@ async function generateWithSunoAPI(params: SunoGenerateParams): Promise<string> 
     body: JSON.stringify({
       prompt,
       customMode: false,
-      instrumental: params.instrumental || false,
+      instrumental: false, // 明確設置為 false，確保有歌聲
       model: "V4_5ALL",
       callBackUrl: "https://example.com/callback", // 必須提供非空 URL
     }),
