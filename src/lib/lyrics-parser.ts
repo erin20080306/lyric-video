@@ -17,6 +17,10 @@ export function parseLyrics(
   const rawLines = lyrics.split("\n");
   const lines: LyricLine[] = [];
 
+  console.log('[parseLyrics] totalDuration:', totalDuration);
+  console.log('[parseLyrics] rawLines count:', rawLines.length);
+  console.log('[parseLyrics] lyrics preview:', lyrics.substring(0, 200));
+
   // 解析歌詞，移除 LRC 時間戳和段落標記
   const parsed: Array<{ text: string; type: LyricLine["type"] }> = [];
   for (const raw of rawLines) {
@@ -43,10 +47,14 @@ export function parseLyrics(
   const effectiveLines = parsed.filter((l) => l.type === "lyric");
   const totalEffective = effectiveLines.length;
 
+  console.log('[parseLyrics] effectiveLines count:', totalEffective);
+
   if (totalEffective === 0) return [];
 
   // 每行佔用的基本時間
   const timePerLine = totalDuration / totalEffective;
+
+  console.log('[parseLyrics] timePerLine:', timePerLine);
 
   let currentTime = 0;
   let id = 0;
@@ -65,6 +73,7 @@ export function parseLyrics(
     }
   }
 
+  console.log('[parseLyrics] parsed lines count:', lines.length);
   return lines;
 }
 
@@ -92,6 +101,8 @@ export function getVisibleLines(
   }
 
   const current = currentIndex >= 0 ? lines[currentIndex] : null;
+
+  console.log('[getVisibleLines] currentTime:', currentTime, 'currentIndex:', currentIndex, 'current text:', current?.text);
 
   // 計算可見範圍
   const half = Math.floor(visibleCount / 2);
