@@ -12,9 +12,9 @@ async function fetchImage(prompt: string, seed: number): Promise<string | null> 
   const encoded = encodeURIComponent(prompt);
   const url = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&nologo=true&seed=${seed}`;
 
-  for (let retry = 0; retry < 2; retry++) {
+  for (let retry = 0; retry < 3; retry++) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
       if (res.ok) {
         const buffer = await res.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
@@ -27,7 +27,7 @@ async function fetchImage(prompt: string, seed: number): Promise<string | null> 
       }
       break;
     } catch {
-      if (retry === 0) await new Promise((r) => setTimeout(r, 2000));
+      if (retry < 2) await new Promise((r) => setTimeout(r, 2000));
     }
   }
   return null;
