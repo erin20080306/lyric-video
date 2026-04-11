@@ -17,7 +17,7 @@ export function parseLyrics(
   const rawLines = lyrics.split("\n");
   const lines: LyricLine[] = [];
 
-  // 解析歌詞，移除 LRC 時間戳
+  // 解析歌詞，移除 LRC 時間戳和段落標記
   const parsed: Array<{ text: string; type: LyricLine["type"] }> = [];
   for (const raw of rawLines) {
     const trimmed = raw.trim();
@@ -25,19 +25,22 @@ export function parseLyrics(
       parsed.push({ text: "", type: "empty" });
     } else {
       // 移除 LRC 時間戳
-      const text = trimmed.replace(/^\[\d{2}:\d{2}\.\d{2}\]/, '').trim();
+      let text = trimmed.replace(/^\[\d{2}:\d{2}\.\d{2}\]/, '').trim();
+      // 移除段落標記（如 [Verse 1], [Chorus]）
+      text = text.replace(/^\[.*?\]$/, '').trim();
+      // 移除標題標記
       if (text.startsWith("【") || text.startsWith("作詞") || text.startsWith("作曲")) {
-        parsed.push({ text, type: "title" });
-      } else if (text.startsWith("[") && text.endsWith("]")) {
-        parsed.push({ text, type: "section" });
-      } else {
+        parsed.push({ text: "", type: "empty" });
+      } else if (text) {
         parsed.push({ text, type: "lyric" });
+      } else {
+        parsed.push({ text: "", type: "empty" });
       }
     }
   }
 
   // 計算有效行數（非空行），用於分配時間
-  const effectiveLines = parsed.filter((l) => l.type !== "empty");
+  const effectiveLines = parsed.filter((l) => l.type === "lyric");
   const totalEffective = effectiveLines.length;
 
   if (totalEffective === 0) return [];
@@ -45,37 +48,21 @@ export function parseLyrics(
   // 每行佔用的基本時間
   const timePerLine = totalDuration / totalEffective;
 
-  // 不同類型行的時間權重
-  const getWeight = (type: LyricLine["type"]): number => {
-    switch (type) {
-      case "title": return 1.5;
-      case "section": return 1.2;
-      case "lyric": return 1.0;
-      case "empty": return 0.3;
-      default: return 1.0;
-    }
-  };
-
-  // 計算加權總和
-  const totalWeight = parsed.reduce((sum, l) => sum + getWeight(l.type), 0);
-  const timePerWeight = totalDuration / totalWeight;
-
   let currentTime = 0;
   let id = 0;
 
   for (const item of parsed) {
-    const weight = getWeight(item.type);
-    const duration = timePerWeight * weight;
-
-    lines.push({
-      id: id++,
-      text: item.text,
-      startTime: currentTime,
-      endTime: currentTime + duration,
-      type: item.type,
-    });
-
-    currentTime += duration;
+    if (item.type === "lyric") {
+      const duration = timePerLine;
+      lines.push({
+        id: id++,
+        text: item.text,
+        startTime: currentTime,
+        endTime: currentTime + duration,
+        type: "lyric",
+      });
+      currentTime += duration;
+    }
   }
 
   return lines;
