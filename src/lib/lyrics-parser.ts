@@ -12,11 +12,13 @@ export interface LyricLine {
  * @param lyrics 歌詞文字
  * @param totalDuration 音樂總時長（秒）
  * @param delay 字幕延遲開始時間（秒），默認 0
+ * @param speed 字幕速度倍率（0.5-2.0），默認 1.0
  */
 export function parseLyrics(
   lyrics: string,
   totalDuration: number,
-  delay: number = 0
+  delay: number = 0,
+  speed: number = 1.0
 ): LyricLine[] {
   const rawLines = lyrics.split("\n");
   const lines: LyricLine[] = [];
@@ -57,12 +59,16 @@ export function parseLyrics(
 
   // 每行佔用的基本時間（根據字符數動態調整，每個字符約 0.8 秒）
   const avgCharsPerLine = effectiveLines.reduce((sum, l) => sum + l.text.length, 0) / totalEffective;
-  const timePerLine = Math.min(
+  const baseTimePerLine = Math.min(
     Math.max(avgCharsPerLine * 0.8, 3), // 最少 3 秒
     Math.min(totalDuration / totalEffective, 10) // 最多 10 秒
   );
+  // 根據速度倍率調整（速度越快，時間越短）
+  const timePerLine = baseTimePerLine / speed;
 
   console.log('[parseLyrics] avgCharsPerLine:', avgCharsPerLine);
+  console.log('[parseLyrics] baseTimePerLine:', baseTimePerLine);
+  console.log('[parseLyrics] speed:', speed);
   console.log('[parseLyrics] timePerLine:', timePerLine);
   console.log('[parseLyrics] delay:', delay);
 

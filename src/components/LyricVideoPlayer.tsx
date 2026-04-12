@@ -78,6 +78,7 @@ export default function LyricVideoPlayer({
   const [isBuffering, setIsBuffering] = useState(false);
   const [subtitleDelay, setSubtitleDelay] = useState(15); // 字幕延遲（秒）
   const [isAutoDelay, setIsAutoDelay] = useState(true); // 是否使用自動延遲
+  const [subtitleSpeed, setSubtitleSpeed] = useState(1.0); // 字幕速度倍率（0.5-2.0）
 
   // 初始化圖片
   useEffect(() => {
@@ -124,10 +125,10 @@ export default function LyricVideoPlayer({
       // 自動計算延遲（總時長的 15%），但用戶可以用滑桿覆蓋
       const autoDelay = Math.floor(duration * 0.15);
       const delay = isAutoDelay ? autoDelay : subtitleDelay;
-      const lines = parseLyrics(lyrics, duration, delay);
+      const lines = parseLyrics(lyrics, duration, delay, subtitleSpeed);
       setLyricLines(lines);
     }
-  }, [lyrics, duration, subtitleDelay, isAutoDelay]);
+  }, [lyrics, duration, subtitleDelay, isAutoDelay, subtitleSpeed]);
 
   // 使用 requestAnimationFrame 平滑更新時間
   const updateTime = useCallback(() => {
@@ -489,6 +490,23 @@ export default function LyricVideoPlayer({
                     <span className="text-white/60 text-xs w-8">{subtitleDelay}s</span>
                   </>
                 )}
+              </div>
+              {/* 字幕速度滑桿 */}
+              <div className="flex items-center gap-2 ml-2">
+                <span className="text-white/60 text-xs">速度</span>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value={subtitleSpeed}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value);
+                    setSubtitleSpeed(value);
+                  }}
+                  className="w-16 sm:w-24 h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
+                />
+                <span className="text-white/60 text-xs w-10">{subtitleSpeed.toFixed(1)}x</span>
               </div>
               {/* 時間 */}
               <span className="text-white/60 text-xs sm:text-sm font-mono tabular-nums">
