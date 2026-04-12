@@ -74,24 +74,27 @@ export default function Home() {
         body: JSON.stringify({ theme: trimmed }),
       });
 
-      const [lyricsRes, imageRes] = await Promise.all([lyricsPromise, imagePromise]);
-
+      // Step 1: 先生成歌詞（音樂需要歌詞）
+      const lyricsRes = await lyricsPromise;
       if (!lyricsRes.ok) throw new Error("歌詞生成失敗");
-      if (!imageRes.ok) throw new Error("背景圖生成失敗");
-
       const lyricsData: LyricsResponse = await lyricsRes.json();
-      const imageData: ImageResponse = await imageRes.json();
 
       setStep("music");
 
-      // Step 2: 生成音樂（需要歌詞）
-      const musicRes = await fetch("/api/generate-music", {
+      // Step 2: 圖片和音樂並行生成
+      const musicPromise = fetch("/api/generate-music", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ theme: trimmed, lyrics: lyricsData.lyrics }),
       });
+
+      const [musicRes, imageRes] = await Promise.all([musicPromise, imagePromise]);
+
       if (!musicRes.ok) throw new Error("音樂生成失敗");
+      if (!imageRes.ok) throw new Error("背景圖生成失敗");
+
       const musicData: MusicResponse = await musicRes.json();
+      const imageData: ImageResponse = await imageRes.json();
 
       setResult({
         lyrics: lyricsData.lyrics,

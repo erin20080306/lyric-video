@@ -76,6 +76,8 @@ export default function LyricVideoPlayer({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [allImages, setAllImages] = useState<string[]>([]);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [subtitleDelay, setSubtitleDelay] = useState(15); // 字幕延遲（秒）
+  const [isAutoDelay, setIsAutoDelay] = useState(true); // 是否使用自動延遲
 
   // 初始化圖片
   useEffect(() => {
@@ -119,10 +121,13 @@ export default function LyricVideoPlayer({
   // 解析歌詞
   useEffect(() => {
     if (lyrics && duration > 0) {
-      const lines = parseLyrics(lyrics, duration);
+      // 自動計算延遲（總時長的 15%），但用戶可以用滑桿覆蓋
+      const autoDelay = Math.floor(duration * 0.15);
+      const delay = isAutoDelay ? autoDelay : subtitleDelay;
+      const lines = parseLyrics(lyrics, duration, delay);
       setLyricLines(lines);
     }
-  }, [lyrics, duration]);
+  }, [lyrics, duration, subtitleDelay, isAutoDelay]);
 
   // 使用 requestAnimationFrame 平滑更新時間
   const updateTime = useCallback(() => {
@@ -452,6 +457,39 @@ export default function LyricVideoPlayer({
                   <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
                 )}
               </button>
+              {/* 字幕延遲滑桿 */}
+              <div className="flex items-center gap-2 ml-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsAutoDelay(!isAutoDelay);
+                  }}
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    isAutoDelay
+                      ? "bg-primary-500 text-white"
+                      : "bg-white/20 text-white/70 hover:bg-white/30"
+                  }`}
+                >
+                  {isAutoDelay ? "自動" : "手動"}
+                </button>
+                {!isAutoDelay && (
+                  <>
+                    <input
+                      type="range"
+                      min="0"
+                      max="60"
+                      step="1"
+                      value={subtitleDelay}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        setSubtitleDelay(value);
+                      }}
+                      className="w-16 sm:w-24 h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
+                    />
+                    <span className="text-white/60 text-xs w-8">{subtitleDelay}s</span>
+                  </>
+                )}
+              </div>
               {/* 時間 */}
               <span className="text-white/60 text-xs sm:text-sm font-mono tabular-nums">
                 {formatTime(currentTime)} / {formatTime(duration)}

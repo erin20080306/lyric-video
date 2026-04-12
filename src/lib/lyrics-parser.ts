@@ -9,10 +9,14 @@ export interface LyricLine {
 /**
  * 將純文字歌詞解析成帶時間軸的字幕行
  * 忽略 LRC 時間戳，改為根據音樂長度自動分配時間
+ * @param lyrics 歌詞文字
+ * @param totalDuration 音樂總時長（秒）
+ * @param delay 字幕延遲開始時間（秒），默認 0
  */
 export function parseLyrics(
   lyrics: string,
-  totalDuration: number
+  totalDuration: number,
+  delay: number = 0
 ): LyricLine[] {
   const rawLines = lyrics.split("\n");
   const lines: LyricLine[] = [];
@@ -60,8 +64,9 @@ export function parseLyrics(
 
   console.log('[parseLyrics] avgCharsPerLine:', avgCharsPerLine);
   console.log('[parseLyrics] timePerLine:', timePerLine);
+  console.log('[parseLyrics] delay:', delay);
 
-  let currentTime = 25; // 延遲 25 秒開始顯示字幕（等待歌聲開始）
+  let currentTime = delay; // 使用延遲參數
   let id = 0;
 
   for (const item of parsed) {
