@@ -61,7 +61,7 @@ export function parseLyrics(
   console.log('[parseLyrics] avgCharsPerLine:', avgCharsPerLine);
   console.log('[parseLyrics] timePerLine:', timePerLine);
 
-  let currentTime = 0;
+  let currentTime = 10; // 延遲 10 秒開始顯示字幕（等待歌聲開始）
   let id = 0;
 
   for (const item of parsed) {

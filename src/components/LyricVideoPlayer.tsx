@@ -305,8 +305,8 @@ export default function LyricVideoPlayer({
           </h2>
         </div>
 
-        {/* 歌詞字幕區 - 居中顯示 */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
+        {/* 歌詞字幕區 - 居中顯示，避免與歌名重疊 */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pt-16 sm:pt-20 z-10 pointer-events-none">
           <div
             className={`flex flex-col items-center gap-1 sm:gap-2 transition-all duration-300 ${
               isFullscreen ? "gap-3" : ""
