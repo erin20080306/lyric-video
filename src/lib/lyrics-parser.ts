@@ -51,9 +51,14 @@ export function parseLyrics(
 
   if (totalEffective === 0) return [];
 
-  // 每行佔用的基本時間（限制最大 5 秒，避免字幕不動）
-  const timePerLine = Math.min(totalDuration / totalEffective, 5);
+  // 每行佔用的基本時間（根據字符數動態調整，每個字符約 0.8 秒）
+  const avgCharsPerLine = effectiveLines.reduce((sum, l) => sum + l.text.length, 0) / totalEffective;
+  const timePerLine = Math.min(
+    Math.max(avgCharsPerLine * 0.8, 3), // 最少 3 秒
+    Math.min(totalDuration / totalEffective, 10) // 最多 10 秒
+  );
 
+  console.log('[parseLyrics] avgCharsPerLine:', avgCharsPerLine);
   console.log('[parseLyrics] timePerLine:', timePerLine);
 
   let currentTime = 0;
